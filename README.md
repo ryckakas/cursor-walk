@@ -142,6 +142,9 @@ The full resolver flow is: `$after` → `CursorCodec::decode()` → `Paginator::
 upstream fetches as it takes, and reports a `hasNextPage` and an `endCursor` that describe the
 *actual* end position — even if that lands in the middle of an upstream page.
 
+<details>
+<summary>Show the full resolver</summary>
+
 ```php
 use CursorWalk\CursorCodec;
 use CursorWalk\Paginator;
@@ -192,7 +195,12 @@ final class WidgetsResolver
 }
 ```
 
-`format()` returns a plain array in Relay Connection shape — no GraphQL library required:
+</details>
+
+`format()` returns a plain array in Relay Connection shape — no GraphQL library required.
+
+<details>
+<summary>Show the output shape</summary>
 
 ```php
 $connection = [
@@ -210,10 +218,15 @@ $connection = [
 ];
 ```
 
+</details>
+
 Per-edge cursors come from an injectable `EdgeCursorStrategy`. The default,
 `OffsetEdgeCursorStrategy`, encodes `(page cursor, offset within page)` via `CursorCodec` — see
 [Cursor stability](#cursor-stability) for what that guarantees and what it does not. If your
-upstream exposes item-level cursors, pass your own strategy:
+upstream exposes item-level cursors, pass your own strategy.
+
+<details>
+<summary>Show a custom edge cursor strategy</summary>
 
 ```php
 use CursorWalk\Page;
@@ -234,10 +247,15 @@ final class UpstreamItemCursorStrategy implements EdgeCursorStrategy
 $formatter = new ConnectionFormatter(new UpstreamItemCursorStrategy());
 ```
 
+</details>
+
 ### Per-page checkpointing with `pages()`
 
 `pages()` yields whole `Page` objects, which makes each page a natural transaction, retry, and
 checkpoint boundary — the shape batch jobs and workflow engines want.
+
+<details>
+<summary>Show a checkpointed batch loop</summary>
 
 ```php
 use CursorWalk\Paginator;
@@ -260,6 +278,8 @@ foreach ($paginator->pages($fetcher, $cursor) as $page) {
 $checkpoints->clear('widget-sync');
 ```
 
+</details>
+
 Note that `pages()` yields empty mid-stream pages as-is (`items: []`, `hasNextPage: true`).
 That is a legal, real-world page — DynamoDB filtered `Query`/`Scan` and any upstream that
 post-filters a page after slicing it produce them. `items()` skips over them transparently; if
@@ -273,7 +293,10 @@ Every `endCursor` you have seen is a valid resume point. Feed it back as `$start
 first `fetchPage()` call receives exactly that cursor.
 
 This is also how you recover from an exhausted page budget. `PageBudgetExceededException`
-carries the last cursor precisely so that a bounded walk can be continued rather than restarted:
+carries the last cursor precisely so that a bounded walk can be continued rather than restarted.
+
+<details>
+<summary>Show a budget-aware resume loop</summary>
 
 ```php
 use CursorWalk\Exception\PageBudgetExceededException;
@@ -301,6 +324,8 @@ while (true) {
 }
 ```
 
+</details>
+
 To resume from a *synthetic edge cursor* — one you handed to a client — decode it first, and
 pass both halves:
 
@@ -327,7 +352,10 @@ you still have the raw payload to attach.
 
 Everything else is a judgment call your fetcher is better placed to make than the engine is.
 The library ships no strictness flags; it gives you an exception with debug context and gets
-out of the way:
+out of the way.
+
+<details>
+<summary>Show a fetcher that enforces its own strictness</summary>
 
 ```php
 use CursorWalk\Exception\MalformedPageException;
@@ -368,8 +396,13 @@ final class StrictWidgetFetcher implements PaginatedFetcher
 }
 ```
 
+</details>
+
 On the consuming side, the three failure modes are distinct classes on purpose — they call for
-different responses:
+different responses.
+
+<details>
+<summary>Show the three catch blocks</summary>
 
 ```php
 use CursorWalk\Exception\MalformedPageException;
@@ -395,6 +428,8 @@ try {
     // Policy. Resume from $e->getLastCursor() — see the recipe above.
 }
 ```
+
+</details>
 
 | Exception | Meaning | Typical response |
 | --- | --- | --- |
@@ -436,30 +471,74 @@ dependency arrow points `Relay\` → core, never the reverse.
 
 ---
 
+## Similar packages
+
+**[`bwaidelich/relay-pagination`](https://github.com/bwaidelich/relay-pagination)** solves the
+adjacent problem, and where it fits it is the better tool. It serves one Relay `Connection` page
+at a time from a data source *you* control — an `ArrayLoader`, a `CallbackLoader`, or its
+Doctrine DBAL/ORM loaders — and it supports backward pagination (`last` / `before`) today. If
+your resolver is backed by your own database, reach for that one first.
+
+`cursor-walk` picks up where your control ends: the upstream is *already* paginated, with opaque
+cursors you did not mint and cannot re-derive — a third-party REST API, a DynamoDB-style scan.
+
+| | `relay-pagination` | `cursor-walk` |
+| --- | --- | --- |
+| Data source | Yours — array, callback, Doctrine | Somebody else's paginated API |
+| Unit of work | Serve one connection page | Walk many upstream pages lazily |
+| Backward pagination | Yes | Not in v1 — [on the roadmap](#roadmap) |
+| Exact-N `first` | One page in, one page out | `slice()` spans as many fetches as it takes |
+| Runaway upstream | — | Loop detection, page budget, resume cursors |
+| Malformed page | — | `MalformedPageException` with cursor and raw payload |
+
+Same neighbourhood, opposite halves: `relay-pagination` generalises *serving* your own data as a
+connection, `cursor-walk` generalises *fetching* somebody else's. Its `CallbackLoader` does give
+you a hook to call a remote API from — but the multi-page walking, the guards, and the resume
+logic behind that hook are still yours to write, and that is the part this package is.
+
+---
+
 ## Design notes
 
 ### Forward-only in v1
 
-Only `after`-style forward pagination is implemented. Backward pagination (`before`/`last`) is
-not a mirror image of forward pagination: it requires the upstream to expose a reverse cursor
-or a stable total ordering, and most APIs that hand out opaque forward cursors expose neither.
-Emulating it — buffering, or walking forward from the start to find the window — would burn the
-memory guarantee that is the whole point of the package. So v1 says so plainly:
+Only `after`-style forward pagination is implemented.
+
+<details>
+<summary>Why, and what emulating it would cost</summary>
+
+Backward pagination (`before`/`last`) is not a mirror image of forward pagination: it requires
+the upstream to expose a reverse cursor or a stable total ordering, and most APIs that hand out
+opaque forward cursors expose neither. Emulating it — buffering, or walking forward from the
+start to find the window — would burn the memory guarantee that is the whole point of the
+package. So v1 says so plainly:
 `pageInfo.hasPreviousPage` is always `false`, and that is a documented v1 constraint, not an
 accident. See the [roadmap](#roadmap).
 
+</details>
+
 ### No built-in HTTP client
 
-The fetcher owns fetching. That single decision keeps the composer `require` block at `php`
-alone, and it means your existing retry middleware, auth token refresh, connection pool,
-timeout policy, tracing, and test doubles all keep working untouched. Pagination and transport
-are genuinely separate concerns; a paginator that also owned HTTP would be worse at both, and
-would force a client choice on every consumer. Non-HTTP upstreams — a database cursor, an SDK,
-a local file — implement the same one-method interface with no adapter layer.
+The fetcher owns fetching.
+
+<details>
+<summary>Why transport stays out of the package</summary>
+
+That single decision keeps the composer `require` block at `php` alone, and it means your
+existing retry middleware, auth token refresh, connection pool, timeout policy, tracing, and
+test doubles all keep working untouched. Pagination and transport are genuinely separate
+concerns; a paginator that also owned HTTP would be worse at both, and would force a client
+choice on every consumer. Non-HTTP upstreams — a database cursor, an SDK, a local file —
+implement the same one-method interface with no adapter layer.
+
+</details>
 
 ### Safety guards: bug versus policy
 
 Two independent guards, deliberately reported as different exception types.
+
+<details>
+<summary>Why they are two exception classes and not one</summary>
 
 `PaginationLoopException` fires when a cursor repeats. That is only ever a defect — in the
 upstream, or in how the fetcher extracts the cursor — and it would loop until the process is
@@ -476,6 +555,8 @@ upstream emitting an ever-fresh cursor with `hasNextPage: true` forever never re
 and never terminates. The default of 10,000 pages is high enough that no legitimate interactive
 workload reaches it and low enough that a runaway loop ends in seconds instead of taking down
 the process. Set it to `null` when you truly want unbounded, and mean it.
+
+</details>
 
 ### Cursor stability
 
