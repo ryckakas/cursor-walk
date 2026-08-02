@@ -1,0 +1,62 @@
+{
+    "name": "ryckakas/cursor-walk",
+    "description": "The fetching half of cursor pagination for PHP: walk paginated upstream APIs lazily, with cursor round-tripping and Relay connection output.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "connection",
+        "cursor",
+        "cursor-pagination",
+        "graphql",
+        "iterator",
+        "pagination",
+        "relay"
+    ],
+    "authors": [
+        {
+            "name": "Ricardas Kauneckas"
+        }
+    ],
+    "require": {
+        "php": ">=8.2"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.64",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "CursorWalk\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "CursorWalk\\Tests\\": "tests/"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "phpunit",
+        "stan": "phpstan analyse",
+        "cs": "php-cs-fixer fix --dry-run --diff",
+        "cs:fix": "php-cs-fixer fix",
+        "check": [
+            "@cs",
+            "@stan",
+            "@test",
+            "@php examples/offline-example.php"
+        ]
+    },
+    "scripts-descriptions": {
+        "test": "Run the test suite with PHPUnit.",
+        "stan": "Run static analysis with PHPStan.",
+        "cs": "Check code style without making changes.",
+        "cs:fix": "Fix code style automatically.",
+        "check": "Run everything CI runs: code style, static analysis, tests, offline example smoke test."
+    }
+}
