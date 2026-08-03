@@ -122,7 +122,6 @@ final class CursorCodecTest extends TestCase
         yield 'plainly non-base64 string' => ['not a cursor!!'];
         yield 'opaque upstream cursor (relay-style)' => ['Y3Vyc29yOnYyOgo='];
         yield 'github link-header style url' => ['https://api.github.com/repositories/1/tags?page=2'];
-        yield 'empty string' => [''];
         yield 'very long string' => [str_repeat('abcdefghij', 500)];
         yield 'string with characters illegal in base64' => ['not-valid-base64!!@@'];
     }
@@ -138,6 +137,17 @@ final class CursorCodecTest extends TestCase
 
         self::assertSame($input, $cursor);
         self::assertSame(0, $offset);
+    }
+
+    #[Test]
+    public function decodeTreatsTheEmptyStringAsTheFirstPage(): void
+    {
+        // '' is what `$args['after'] ?? ''` produces for an absent argument, so
+        // it must mean "from the beginning" — passing it through as ['', 0]
+        // would make the docblock resolver recipes call fetchPage('').
+        $codec = new CursorCodec();
+
+        self::assertSame([null, 0], $codec->decode(''));
     }
 
     #[Test]

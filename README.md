@@ -65,20 +65,30 @@ use CursorWalk\Exception\MalformedPageException;
 use CursorWalk\Page;
 use CursorWalk\PaginatedFetcher;
 use CursorWalk\Paginator;
+use Psr\Http\Client\ClientInterface;
+use Psr\Http\Message\RequestFactoryInterface;
 
 /** @implements PaginatedFetcher<array{id: int, name: string}> */
 final class WidgetFetcher implements PaginatedFetcher
 {
+    // The fetcher owns transport — the library never makes a request itself.
+    // Any PSR-18 client fits here: Guzzle, Symfony HttpClient, or your
+    // framework's wrapper around one.
+    public function __construct(
+        private readonly ClientInterface $http,
+        private readonly RequestFactoryInterface $requestFactory,
+    ) {
+    }
+
     public function fetchPage(?string $cursor): Page
     {
         $url = 'https://api.example.com/widgets?limit=100'
             . ($cursor === null ? '' : '&after=' . urlencode($cursor));
 
-        // Swap this for your PSR-18 client, Guzzle, Laravel's Http facade — the
-        // fetcher owns fetching, the library never makes a request itself.
-        $body = file_get_contents($url);
+        $response = $this->http->sendRequest($this->requestFactory->createRequest('GET', $url));
 
-        $data = $body === false ? null : json_decode($body, true);
+        $body = (string) $response->getBody();
+        $data = json_decode($body, true);
         if (!is_array($data) || !isset($data['data']) || !is_array($data['data'])) {
             throw MalformedPageException::invalidEnvelope('missing "data" key', $cursor, $body);
         }
@@ -93,8 +103,9 @@ final class WidgetFetcher implements PaginatedFetcher
 }
 
 $paginator = new Paginator();
+$fetcher = new WidgetFetcher($httpClient, $requestFactory); // your PSR-18 client + PSR-17 factory
 
-foreach ($paginator->items(new WidgetFetcher()) as $widget) {
+foreach ($paginator->items($fetcher) as $widget) {
     echo $widget['name'], PHP_EOL;
 }
 ```
@@ -341,7 +352,9 @@ foreach ($paginator->items($fetcher, $pageCursor, $skip) as $widget) {
 
 `decode()` never throws. A cursor it does not recognise — an opaque cursor straight from the
 upstream, for instance — passes through unchanged as `[$after, 0]`, so raw upstream cursors and
-synthetic edge cursors are interchangeable at the API boundary.
+synthetic edge cursors are interchangeable at the API boundary. The one exception is the empty
+string, which decodes to `[null, 0]` — the first page — so `$codec->decode($args['after'] ?? '')`
+does the right thing when the argument is absent.
 
 ### Handling malformed upstream pages
 
@@ -555,6 +568,11 @@ upstream emitting an ever-fresh cursor with `hasNextPage: true` forever never re
 and never terminates. The default of 10,000 pages is high enough that no legitimate interactive
 workload reaches it and low enough that a runaway loop ends in seconds instead of taking down
 the process. Set it to `null` when you truly want unbounded, and mean it.
+
+`null` has one more cost: repeated-cursor detection keeps every cursor it has seen, so guard
+memory grows with the walk — on the order of 100 bytes per page. Under the default budget that
+caps out at a few megabytes; on an unbounded multi-million-page backfill it does not. Run walks
+of that size as bounded chunks resumed from `pages()` checkpoints instead of one unbounded walk.
 
 </details>
 

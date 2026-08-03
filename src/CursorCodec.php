@@ -76,11 +76,20 @@ final class CursorCodec
      * what a client sends back, and a raw upstream cursor is a perfectly
      * legitimate `after` value.
      *
+     * The empty string is the one exception to pass-through: it decodes to
+     * `[null, 0]` — the first page. It is what `$args['after'] ?? ''` produces
+     * for an absent argument, and no legitimate flow emits a bare `''` cursor
+     * ({@see Page} forbids an empty `endCursor` on a continuing page).
+     *
      * @return array{?string, int} the page cursor to fetch, and how many items
      *                             to skip from there
      */
     public function decode(string $after): array
     {
+        if ($after === '') {
+            return [null, 0];
+        }
+
         // Gate 1: strict base64. Anything with out-of-alphabet bytes is foreign.
         $json = base64_decode($after, true);
         if ($json === false) {

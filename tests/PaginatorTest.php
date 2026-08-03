@@ -861,6 +861,35 @@ final class PaginatorTest extends TestCase
     }
 
     #[Test]
+    public function sliceEndingExactlyOnAPageBoundaryEmitsTheRawUpstreamEndCursor(): void
+    {
+        // Documented in Paginator::slice(): a boundary-aligned slice anchors to
+        // the upstream's own cursor, the cheapest possible resume point.
+        $fetcher = new ArrayFetcher(self::dataset(10), 5);
+
+        $page = (new Paginator())->slice($fetcher, 5);
+
+        self::assertSame(self::itemRange(1, 5), $page->items);
+        self::assertTrue($page->hasNextPage);
+        self::assertSame(
+            ArrayFetcher::cursorFor(5),
+            $page->endCursor,
+            'a boundary-aligned slice must emit the raw upstream endCursor, not a synthetic position',
+        );
+    }
+
+    #[Test]
+    public function slicePropagatesTotalCountFromTheLastFetchedPage(): void
+    {
+        $fetcher = new ArrayFetcher(self::dataset(10), 3, withTotalCount: true);
+
+        $page = (new Paginator())->slice($fetcher, 4);
+
+        self::assertSame(self::itemRange(1, 4), $page->items);
+        self::assertSame(10, $page->totalCount);
+    }
+
+    #[Test]
     public function sliceResumesFromItsOwnEndCursorWithoutGapsOrDuplicates(): void
     {
         // spec case 21

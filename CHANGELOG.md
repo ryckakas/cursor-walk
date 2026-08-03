@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `CursorCodec::decode('')` now returns `[null, 0]` (the first page) instead of passing the
+  empty string through as `['', 0]`, so the `$codec->decode($args['after'] ?? '')` recipe
+  requests the first page when the argument is absent.
+
 ### Planned
 
 - ID-anchored edge cursors via an optional `ItemIdExtractor`: encode
