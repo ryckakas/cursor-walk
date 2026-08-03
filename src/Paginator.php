@@ -42,7 +42,10 @@ final class Paginator
      *    hard — a few dozen pages. A user-facing request that needs thousands of
      *    upstream round trips is already broken; prefer {@see self::slice()}.
      *  - **Batch jobs / backfills:** raise it, or pass `null` and rely on
-     *    per-page checkpointing via {@see self::pages()}.
+     *    per-page checkpointing via {@see self::pages()}. Note that
+     *    repeated-cursor detection keeps every cursor seen, so guard memory is
+     *    O(pages fetched) — run a multi-million-page backfill as bounded
+     *    chunks resumed from checkpoints, not as one unbounded walk.
      *
      * When the budget runs out the engine throws
      * {@see PageBudgetExceededException}, which carries the cursor of the page
