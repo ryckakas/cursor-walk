@@ -27,9 +27,23 @@
     // Floors, not aspirations: CI fails below these.
     //   minMsi        — of all mutants generated.
     //   minCoveredMsi — of mutants on lines the suite actually covers, which is
-    //                   the number that reflects assertion strength.
-    minMsi: 80,
-    minCoveredMsi: 80,
+    //                   the number that reflects assertion strength. Line coverage
+    //                   is 100%, so the two currently coincide.
+    //
+    // Set from the measured baseline (85.45% on 8.2/8.3/8.4/8.5), not guessed, and
+    // deliberately a fraction under it: the kill count varies slightly between PHP
+    // versions, and a floor that sits exactly on the measurement fails on noise
+    // rather than on a regression.
+    //
+    // Raising this is only worth it against a real escaped mutant. Most of the
+    // ~39 that survive here are EQUIVALENT mutants — `max(0, $skip)` to
+    // `max(-1, $skip)` where a negative is never used, `>=` to `>` where
+    // array_slice() absorbs the difference, `$seen[$k] = true` to `= false` where
+    // the read is isset() — plus exception-message concatenation. Killing those
+    // would mean asserting unobservable internals or exact message wording, which
+    // buys a number rather than a guarantee.
+    minMsi: 85,
+    minCoveredMsi: 85,
     // A mutant that hangs is a mutant the suite did not kill. The full suite runs
     // in well under a second, so 10s per mutant is generous.
     timeout: 10,

@@ -299,6 +299,27 @@ final class WalkTest extends TestCase
     }
 
     #[Test]
+    public function aTerminalPageWhoseTrailingCursorRepeatsIsNotALoop(): void
+    {
+        // Page documents "final page with a trailing cursor — legal, ignored": an
+        // upstream that always emits a cursor, even on its last page, is fine. So a
+        // terminal page whose cursor happens to be one already seen must simply end
+        // the walk. Nothing will be fetched with it, so there is no loop to report,
+        // and raising PaginationLoopException here would page an on-call engineer
+        // about a healthy upstream.
+        //
+        // FOUND BY MUTATION TESTING: removing the early return after
+        // hasNextPage=false left the entire suite passing, because no test drove
+        // this combination.
+        $walk = new Walk('cursor-1');
+        $walk->nextCursor();
+
+        $walk->advance(new Page(['x'], 'cursor-1', false));
+
+        self::assertFalse($walk->hasNext(), 'the walk ends on the terminal page, without complaint');
+    }
+
+    #[Test]
     public function aCursorMayRepeatAcrossSeparateWalksBecauseEachWalkTracksItsOwn(): void
     {
         $first = new Walk();
@@ -500,8 +521,10 @@ final class WalkTest extends TestCase
         // The Temporal shape without the Temporal SDK: every fetch leaves the walk's
         // frame as a yielded request and comes back as a plain result, exactly as an
         // activity call does. Nothing in Walk cares.
+        // Keyed by cursor, with '' standing in for the null first-page cursor —
+        // spelled out rather than relying on PHP coercing a null key to ''.
         $upstream = [
-            null => ['rows' => ['a', 'b'], 'next' => 'c1'],
+            '' => ['rows' => ['a', 'b'], 'next' => 'c1'],
             'c1' => ['rows' => ['c'], 'next' => 'c2'],
             'c2' => ['rows' => ['d', 'e'], 'next' => null],
         ];
