@@ -110,6 +110,10 @@ foreach ($paginator->items($fetcher) as $widget) {
 }
 ```
 
+Upstream paginated by page number or row offset instead of an opaque cursor? Extend one of the
+base classes in `CursorWalk\Offset\` and implement `fetchAt()` instead — see
+[Page-numbered and offset upstreams](#page-numbered-and-offset-upstreams).
+
 ### The three methods
 
 `Paginator` is stateless and safe to reuse. It has exactly three entry points:
@@ -223,13 +227,22 @@ $connection = [
         'endCursor' => 'eyJ2IjoxLCJj...',
         'hasNextPage' => true,
         'startCursor' => 'eyJ2IjoxLCJj...',
-        'hasPreviousPage' => false, // always false in v1 — forward-only
+        // true whenever the page was fetched from a position other than the
+        // origin — see the note below.
+        'hasPreviousPage' => false,
     ],
     'totalCount' => 4213, // sibling key, present only when the Page carried one
 ];
 ```
 
 </details>
+
+`hasPreviousPage` is `true` exactly when the `$pageStartCursor` you passed describes a position
+other than the origin — a page anchor, or a non-zero offset into the first page. Both are proof
+that something precedes the window, and the Relay spec permits reporting `true` whenever the
+server can determine that efficiently. It is still not backward pagination: there is no way to
+travel backwards, only an honest answer about where this window sits. Omit `$pageStartCursor` and
+the page is positioned as though it began the stream, so the flag comes back `false`.
 
 Per-edge cursors come from an injectable `EdgeCursorStrategy`. The default,
 `OffsetEdgeCursorStrategy`, encodes `(page cursor, offset within page)` via `CursorCodec` — see
@@ -355,6 +368,134 @@ upstream, for instance — passes through unchanged as `[$after, 0]`, so raw ups
 synthetic edge cursors are interchangeable at the API boundary. The one exception is the empty
 string, which decodes to `[null, 0]` — the first page — so `$codec->decode($args['after'] ?? '')`
 does the right thing when the argument is absent.
+
+### Page-numbered and offset upstreams
+
+`?page=2&per_page=50` and `?offset=100&limit=50` are the most common shapes in B2B REST APIs,
+and they need no special engine mode: `fetchPage(?string $cursor)` never says what a cursor
+*means*, so a page number is a perfectly legal opaque one. Two base classes in
+`CursorWalk\Offset\` supply the boilerplate — cursor parse and format, terminal-condition
+derivation, and the off-by-one when the last page happens to be exactly full:
+
+```php
+use CursorWalk\Offset\OffsetPage;
+use CursorWalk\Offset\PageNumberFetcher;
+
+/** @extends PageNumberFetcher<array<string, mixed>> */
+final class ContactsFetcher extends PageNumberFetcher
+{
+    public function __construct(private readonly HttpClient $http)
+    {
+        parent::__construct(pageSize: 50);
+    }
+
+    protected function fetchAt(int $position, int $pageSize): OffsetPage
+    {
+        $body = $this->http->getJson('/contacts', ['page' => $position, 'per_page' => $pageSize]);
+
+        // Report what the envelope told you; the base class derives hasNextPage
+        // and the next cursor from it.
+        return new OffsetPage(
+            $body['data'],
+            totalItems: $body['meta']['total'] ?? null,
+            totalPages: $body['meta']['totalPages'] ?? null,
+        );
+    }
+}
+```
+
+That is the whole integration. `items()`, `pages()`, `slice()` and `ConnectionFormatter` all work
+over it unchanged, and the cursors are plain integer strings — human-debuggable, and passed
+through untouched by `CursorCodec::decode()` as foreign cursors, so edge-cursor round-tripping in
+a resolver keeps working.
+
+Use `OffsetFetcher` instead when the upstream accepts raw offsets. Its `$position` is a row
+offset rather than a page number, and that makes its cursors **independent of the page size** —
+whereas `"3"` from a `PageNumberFetcher` only means anything relative to the size it was produced
+with.
+
+> **The loop guard is inert for these upstreams.** Positions increase monotonically, so they
+> never repeat, and `PaginationLoopException` can therefore never fire for a `PageNumberFetcher`.
+> What replaces it is stronger where it exists: a reported `totalPages` or `totalItems` catches a
+> runaway envelope on the very page that produced it, rather than one page later. When the
+> envelope reports **neither**, the only remaining terminal condition is "a short page ends the
+> walk" — and the only thing standing between you and an upstream that claims a full page forever
+> is [the page budget](#the-page-budget). Keep it on, and size it deliberately.
+
+<details>
+<summary>Show the terminal conditions, and the page-size trap</summary>
+
+`OffsetPage::hasMoreAfter()` picks the strongest signal the envelope gave it:
+
+| upstream reports | terminal condition |
+| --- | --- |
+| `totalPages` | `$pageNumber < $totalPages` |
+| `totalItems` only | `$itemsThrough < $totalItems` |
+| neither | a page shorter than `$pageSize` is the last one |
+
+The third rule costs one wasted round trip when the final page happens to be exactly full: the
+next fetch comes back empty and ends the walk. A wasted call, never a missed row.
+
+Because `hasNextPage` is *derived* rather than read from the envelope, the inconsistency a
+hand-rolled guard would look for — an envelope claiming more data past its own `totalPages` —
+is definitionally impossible here. The redundant degree of freedom is gone rather than guarded.
+
+**Never derive a `PageNumberFetcher`'s `$pageSize` from a per-request Relay `first`.** A resolver
+that does silently resumes returned cursors at the wrong window the moment a client asks for a
+different size. That is what `slice()` is for: keep the fetcher's chunk size fixed and let
+`slice()` cut a variable window out of it. The constructor takes `$pageSize` with no default so
+that the choice is always deliberate.
+
+A 0-indexed upstream needs no separate class and no flag — request `$position - 1` inside
+`fetchAt()` and leave the walk 1-based.
+
+</details>
+
+### Driving the walk yourself (workflow engines, event loops)
+
+**Use `Paginator` unless you cannot.** The one case it cannot serve is a caller that is unable to
+let the library call `fetchPage()` at all: a Temporal workflow, where every fetch must go through
+an activity `yield`, or an event loop where it must go through a promise. A `PaginatedFetcher`
+cannot yield.
+
+`Walk` is the same policy — budget, cursor threading, loop detection, termination — as a stepper
+you drive. `Paginator::pages()` is itself a driver over it, so the two cannot drift.
+
+```php
+use CursorWalk\Page;
+use CursorWalk\Walk;
+
+$walk = new Walk($dto->resumeCursor, maxPages: 500);
+
+while ($walk->hasNext()) {
+    $result = yield $this->activity->fetchContacts($dto, $walk->nextCursor());
+
+    yield from $this->processPage($result);
+
+    // Reconstruct rather than marshal: payload converters instantiate via
+    // reflection and bypass Page's constructor, which is the only enforcement
+    // point of its legal states. Rebuilding it here re-runs that validation on
+    // the side where the walk needs it to hold.
+    $walk->advance(new Page($result->items, $result->endCursor, $result->hasNextPage));
+}
+```
+
+`nextCursor()` then `advance()`, once each, in that order, until `hasNext()` reports false. Any
+other order is a driver bug and throws `\LogicException` — deliberately *not* a
+`CursorWalkException`, because a driver misusing the stepper is neither an upstream bug nor a
+policy limit.
+
+Replay safety follows from where the state comes from: everything `Walk` knows derives from the
+`Page` values handed to `advance()`, which a replaying engine reproduces identically. One walk
+means one `Walk` instance — it is single-use, must never be shared between concurrent walks, and
+must never be registered as a service. `Paginator` remains the thing you inject.
+
+There are deliberately no convenience methods on `Walk`. No `items()`, no `slice()`. If you want
+those, you want `Paginator`.
+
+> A guard exception thrown inside workflow code is yours to convert into whatever your engine
+> treats as non-retryable (an `ApplicationFailure`, for Temporal). Left alone, it will be retried
+> forever.
 
 ### Handling malformed upstream pages
 
@@ -499,7 +640,7 @@ cursors you did not mint and cannot re-derive — a third-party REST API, a Dyna
 | --- | --- | --- |
 | Data source | Yours — array, callback, Doctrine | Somebody else's paginated API |
 | Unit of work | Serve one connection page | Walk many upstream pages lazily |
-| Backward pagination | Yes | Not in v1 — [on the roadmap](#roadmap) |
+| Backward pagination | Yes | No — forward-only, [on the roadmap](#roadmap) |
 | Exact-N `first` | One page in, one page out | `slice()` spans as many fetches as it takes |
 | Runaway upstream | — | Loop detection, page budget, resume cursors |
 | Malformed page | — | `MalformedPageException` with cursor and raw payload |
@@ -513,7 +654,7 @@ logic behind that hook are still yours to write, and that is the part this packa
 
 ## Design notes
 
-### Forward-only in v1
+### Forward-only
 
 Only `after`-style forward pagination is implemented.
 
@@ -524,9 +665,15 @@ Backward pagination (`before`/`last`) is not a mirror image of forward paginatio
 the upstream to expose a reverse cursor or a stable total ordering, and most APIs that hand out
 opaque forward cursors expose neither. Emulating it — buffering, or walking forward from the
 start to find the window — would burn the memory guarantee that is the whole point of the
-package. So v1 says so plainly:
-`pageInfo.hasPreviousPage` is always `false`, and that is a documented v1 constraint, not an
-accident. See the [roadmap](#roadmap).
+package. So the package says so plainly, and there is no `before` / `last`. See the
+[roadmap](#roadmap).
+
+**Amended in 0.2.0:** `pageInfo.hasPreviousPage` used to be hardcoded `false`, which was
+described here as a forward-only constraint. It was not one. The formatter already receives the
+cursor a page was fetched with, and a non-origin start position is proof that elements precede
+the window — a fact the engine holds and was throwing away, and one the Relay spec explicitly
+allows a server to report. Reporting it is not backward traversal; it adds no way to go
+backwards. The forward-only constraint above is unchanged.
 
 </details>
 
@@ -627,15 +774,22 @@ with no extractor configured, the strategy stays in today's offset mode. The `Cu
 envelope already carries a `v` version field for precisely this migration, so v1-issued cursors
 keep decoding after the upgrade.
 
-**Backward pagination.** `before` / `last`, and a `hasPreviousPage` that reports something
-other than `false` — for upstreams that actually support reverse traversal.
+**Async / concurrent fetching.** A prefetching driver over `Walk`, so `slice()` can fetch the next
+upstream page while the current one is being mapped. The policy/driver split that 0.2.0 introduced
+is the prerequisite this needed: it is now a second driver rather than a re-architecture. Bounded
+concurrency only; laziness stays the default.
 
-**Async / concurrent fetching.** Fibers or a promise-based fetcher interface, so `slice()` can
-prefetch the next upstream page while the current one is being mapped. Bounded concurrency
-only; laziness stays the default.
+**Backward pagination.** `before` / `last`, for upstreams that actually support reverse traversal.
+Demoted below async: most opaque-cursor upstreams cannot support it at all, and
+[`bwaidelich/relay-pagination`](https://github.com/bwaidelich/relay-pagination) already owns the
+case where you control the data. The truthful `hasPreviousPage` in 0.2.0 removed the most visible
+symptom without opening this door.
 
-Also considered and deliberately out of scope for now: a built-in HTTP client, caching, and
-offset-based pagination adapters.
+Also considered and deliberately out of scope: a built-in HTTP client, caching, multi-source
+fan-out/merge, and telemetry hooks. Fan-out needs relevance tiers, per-source weights, interleave
+policy and failure isolation — none of which generalise, so a generic merger would either hardcode
+one arbitrary policy or grow a config surface larger than this package. Telemetry already has two
+seams: log inside `fetchPage()`, or log per page while consuming `pages()`.
 
 ---
 
