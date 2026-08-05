@@ -6,6 +6,9 @@
 # Libraries do not commit the lock file; consumers resolve their own versions.
 composer.lock
 
+# Scratch space for tooling state; never part of a release
+/tmp/
+
 # Editor / OS noise
 .idea/
 .vscode/
