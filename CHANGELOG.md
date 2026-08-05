@@ -7,28 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- `CursorWalk\Offset\PositionalFetcher` now rejects a positional cursor too large for the
-  position arithmetic, instead of letting it overflow. Cursors are client-supplied — a resolver
-  hands back whatever `after` it is given — and an over-large one turned the derived row count
-  into a float, which surfaced from `OffsetPage::hasMoreAfter()` as an uncaught `TypeError`
-  rather than the documented `MalformedPageException`. `PageNumberFetcher` was reachable at 18
-  digits (the page number is multiplied by the page size) and `OffsetFetcher` at 19, where the
-  `(int)` cast saturates at `PHP_INT_MAX` and every larger cursor silently addressed the same
-  position. Both now throw `MalformedPageException` before the upstream is called at all.
-- `CursorWalk\Offset\PositionalFetcher` no longer accepts a cursor with a trailing newline.
-  `/^\d+$/` matches before one, so `"5\n"` parsed as page 5; the pattern is now `\A`/`\z`-anchored.
-
-### Changed
-
-- `ConnectionFormatter`'s `hasPreviousPage` docblock no longer claims the flag is `true`
-  *exactly* when the position is non-origin. It reads the cursor as `CursorCodec` does, so a bare
-  positional `'0'` — `OffsetFetcher`'s origin — reports `true`. Behaviour is unchanged: the fix
-  belongs on the caller's side (pass `null` for the first page, as the recipes do), because
-  teaching the Relay layer to recognise one fetcher's wire format would leak that format across
-  the boundary.
-
 ### Planned
 
 - ID-anchored edge cursors via an optional `ItemIdExtractor`: encode
@@ -58,7 +36,10 @@ unchanged and there is still no runtime dependency.
     optional `totalItems` and `totalPages`. Owns the terminal-condition precedence — `totalPages`,
     else `totalItems`, else "a page shorter than `$pageSize` is the last one".
   - `CursorWalk\Offset\PositionalFetcher` — the page-size and cursor-parsing plumbing the two
-    share. Extend one of the two above, not this.
+    share. Extend one of the two above, not this. Positional cursors are client-supplied, so they
+    are validated on the way in: anything that is not a plain non-negative integer, or that is too
+    large for the position arithmetic to hold in an `int`, raises `MalformedPageException` before
+    the upstream is called.
   - Note that repeated-cursor detection is **inert** for page numbers, since positions never
     repeat; a reported `totalPages`/`totalItems` is the stronger guard where the envelope has one,
     and the page budget is the backstop where it does not. `PageNumberFetcher` cursors are also
@@ -77,8 +58,8 @@ unchanged and there is still no runtime dependency.
 ### Changed
 
 - **`pageInfo.hasPreviousPage` is now reported truthfully** instead of being hardcoded `false`.
-  It is `true` exactly when the `$pageStartCursor` passed to `ConnectionFormatter::format()`
-  describes a position other than the origin. Previously every page after the first reported
+  It is `true` when the `$pageStartCursor` passed to `ConnectionFormatter::format()` decodes to a
+  position other than the origin. Previously every page after the first reported
   `false`, which was wrong: the formatter already held the fact, and the Relay spec permits
   reporting it. This is not backward pagination and adds no way to travel backwards. A caller that
   omits `$pageStartCursor` still gets `false`, since the page is then positioned as though it began
