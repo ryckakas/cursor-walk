@@ -48,7 +48,7 @@ jobs:
         run: composer validate --strict
 
       - name: Install dependencies
-        uses: ramsey/composer-install@v3
+        uses: ramsey/composer-install@v4
 
       # Dev dependencies are pinned to exact versions, which is what makes an
       # advisory against one actionable instead of "probably already fixed".
