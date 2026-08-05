@@ -53,11 +53,6 @@ use CursorWalk\Exception\PaginationLoopException;
  * concurrent walks, and never register it as a service: `Paginator` is the thing
  * you inject, and it stays stateless.
  *
- * (The state here is not new state in the library. In v0.1.0 the same three
- * variables lived as locals in the `Paginator::pages()` generator frame; this
- * class is that frame, named and handed to the caller. What the generator gave
- * for free was misuse-proofing, which the alternation check above replaces.)
- *
  * ## Replay safety
  *
  * Every bit of this object's state derives from the {@see Page} values handed to
@@ -81,8 +76,7 @@ final class Walk
     private int $fetched = 0;
 
     /**
-     * Cursors already handed out, for repeated-cursor detection. O(pages) memory,
-     * the same as v0.1.0's generator-local set.
+     * Cursors already handed out, for repeated-cursor detection. O(pages) memory.
      *
      * @var array<string, true>
      */
@@ -117,10 +111,17 @@ final class Walk
     }
 
     /**
-     * Whether another page may be fetched.
+     * Whether the walk still has data to ask for.
      *
      * True before the first fetch, including for an empty upstream: one fetch is
      * always needed to learn there is nothing there.
+     *
+     * Not the same as "the next `nextCursor()` will succeed". The page budget is
+     * enforced in `nextCursor()`, so an exhausted walk still reports `true` here
+     * and throws on the draw — deliberately unlike the loop guard, which marks the
+     * walk finished. A budget that ended the loop quietly would be indistinguishable
+     * from reaching the end of the stream, which is the one thing a resumable
+     * checkpoint must never be.
      */
     public function hasNext(): bool
     {
