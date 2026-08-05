@@ -139,6 +139,36 @@ final class CursorCodecTest extends TestCase
         self::assertSame(0, $offset);
     }
 
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function positionalCursorProvider(): iterable
+    {
+        // Odd-length numerics fail the strict-base64 gate outright; even-length ones
+        // survive it as binary garbage and die at the JSON gate. Both must land in
+        // the foreign-cursor lane, so the table covers both parities.
+        yield 'single digit page number' => ['2'];
+        yield 'single digit, zero' => ['0'];
+        yield 'two digits' => ['12'];
+        yield 'three digits' => ['100'];
+        yield 'four digits' => ['1024'];
+        yield 'large row offset' => ['987654'];
+    }
+
+    #[Test]
+    #[DataProvider('positionalCursorProvider')]
+    public function decodePassesPlainIntegerCursorsThroughUntouched(string $input): void
+    {
+        // REGRESSION GUARD for CursorWalk\Offset: PageNumberFetcher and OffsetFetcher
+        // emit bare integer strings as their endCursor. If any numeric string were
+        // mistaken for a position envelope, edge-cursor round-tripping over a
+        // page-numbered upstream would silently resume at the wrong window — so the
+        // wire format's safety is pinned here rather than assumed.
+        $codec = new CursorCodec();
+
+        self::assertSame([$input, 0], $codec->decode($input));
+    }
+
     #[Test]
     public function decodeTreatsTheEmptyStringAsTheFirstPage(): void
     {
