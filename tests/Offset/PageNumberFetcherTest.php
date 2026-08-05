@@ -217,6 +217,17 @@ final class PageNumberFetcherTest extends TestCase
         self::assertSame($reporting === TotalsReporting::Neither ? 2 : 1, $fetcher->callCount());
     }
 
+    #[Test]
+    public function aPageSizeOfExactlyOneIsTheSmallestLegalValueAndIsAccepted(): void
+    {
+        $fetcher = new PageNumberApiFetcher(self::rows(3), 1, TotalsReporting::TotalPages);
+
+        $items = iterator_to_array((new Paginator())->items($fetcher), false);
+
+        self::assertSame(self::rows(3), $items);
+        self::assertSame([1, 2, 3], $fetcher->requested());
+    }
+
     // ------------------------------------------------------------------
     // Resuming — positions are absolute, not walk-relative
     // ------------------------------------------------------------------
