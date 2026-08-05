@@ -169,6 +169,49 @@ final class CursorCodecTest extends TestCase
         self::assertSame([$input, 0], $codec->decode($input));
     }
 
+    /**
+     * Envelopes that clear all three gates — valid base64, valid JSON, both `v`
+     * and `o` present — but carry a payload the codec cannot use.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function structurallyValidButUnusableEnvelopeProvider(): iterable
+    {
+        yield 'offset is a string' => [base64_encode('{"v":1,"c":null,"o":"5"}')];
+        yield 'offset is a float' => [base64_encode('{"v":1,"c":null,"o":1.5}')];
+        yield 'offset is null' => [base64_encode('{"v":1,"c":null,"o":null}')];
+        yield 'offset is negative' => [base64_encode('{"v":1,"c":null,"o":-1}')];
+        yield 'page cursor is an int' => [base64_encode('{"v":1,"c":7,"o":0}')];
+        yield 'page cursor is an array' => [base64_encode('{"v":1,"c":["a"],"o":0}')];
+        yield 'page cursor is a bool' => [base64_encode('{"v":1,"c":true,"o":0}')];
+    }
+
+    #[Test]
+    #[DataProvider('structurallyValidButUnusableEnvelopeProvider')]
+    public function decodeFallsBackToForeignForAnEnvelopeItCannotTrust(string $input): void
+    {
+        // The last two guards in decode(): an offset that is not a non-negative
+        // int, and a page cursor that is neither null nor a string. Reachable from
+        // production — a client can send back any string it likes, and these
+        // decode far enough to look like our own envelope. Treating them as
+        // foreign is the safe reading; the alternative is a TypeError deep inside
+        // Paginator, from a value the application never controlled.
+        $codec = new CursorCodec();
+
+        self::assertSame([$input, 0], $codec->decode($input));
+    }
+
+    #[Test]
+    public function decodeAcceptsAZeroOffsetWhichIsTheOnlyNonNegativeEdgeCase(): void
+    {
+        // Guards against the guard being written as `$offset < 1` or `!$offset`:
+        // zero is a legal position, meaning "this page, nothing skipped".
+        $codec = new CursorCodec();
+
+        self::assertSame([null, 0], $codec->decode($codec->encode(null, 0)));
+        self::assertSame(['page-2', 0], $codec->decode($codec->encode('page-2', 0)));
+    }
+
     #[Test]
     public function decodeTreatsTheEmptyStringAsTheFirstPage(): void
     {

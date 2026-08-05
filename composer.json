@@ -21,9 +21,11 @@
         "php": ">=8.2"
     },
     "require-dev": {
-        "friendsofphp/php-cs-fixer": "^3.64",
-        "phpstan/phpstan": "^2.0",
-        "phpunit/phpunit": "^11.0"
+        "ext-simplexml": "*",
+        "friendsofphp/php-cs-fixer": "3.95.18",
+        "infection/infection": "0.32.6",
+        "phpstan/phpstan": "2.2.7",
+        "phpunit/phpunit": "11.5.56"
     },
     "autoload": {
         "psr-4": {
@@ -38,18 +40,38 @@
     "minimum-stability": "stable",
     "prefer-stable": true,
     "config": {
-        "sort-packages": true
+        "sort-packages": true,
+        "allow-plugins": {
+            "infection/extension-installer": false
+        }
     },
     "scripts": {
         "test": "phpunit",
         "stan": "phpstan analyse",
         "cs": "php-cs-fixer fix --dry-run --diff",
         "cs:fix": "php-cs-fixer fix",
+        "coverage": [
+            "@putenv XDEBUG_MODE=coverage",
+            "phpunit --coverage-clover=build/coverage/clover.xml --coverage-text",
+            "@php tools/check-coverage.php build/coverage/clover.xml"
+        ],
+        "mutation": [
+            "@putenv XDEBUG_MODE=coverage",
+            "infection --show-mutations --no-interaction"
+        ],
         "check": [
             "@cs",
             "@stan",
             "@test",
             "@php examples/offline-example.php"
+        ],
+        "check:ci": [
+            "@composer validate --strict",
+            "@cs",
+            "@stan",
+            "@coverage",
+            "@php examples/offline-example.php",
+            "@mutation"
         ]
     },
     "scripts-descriptions": {
@@ -57,6 +79,9 @@
         "stan": "Run static analysis with PHPStan.",
         "cs": "Check code style without making changes.",
         "cs:fix": "Fix code style automatically.",
-        "check": "Run everything CI runs: code style, static analysis, tests, offline example smoke test."
+        "coverage": "Run tests with coverage and fail below the line-coverage floor.",
+        "mutation": "Run mutation testing (Infection) and fail below the MSI floors.",
+        "check": "The fast local gate: code style, static analysis, tests, offline example smoke test.",
+        "check:ci": "Everything CI runs, including coverage and mutation testing. Needs a coverage driver (xdebug or pcov)."
     }
 }

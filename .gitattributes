@@ -1,0 +1,26 @@
+# Normalize every text file to LF in the repository AND in the working tree.
+#
+# Without this, a Windows checkout with core.autocrlf=true materializes CRLF
+# working-tree files while the index holds LF. php-cs-fixer's PSR-12 ruleset
+# requires LF, so `composer cs` then reports every file as needing fixes while
+# CI — checking out LF on Linux — passes. Local and CI have to agree, and LF is
+# the side that is correct.
+* text=auto eol=lf
+
+# Keep diffs meaningful for the language-detection and linguist tooling.
+*.php text eol=lf diff=php
+*.md text eol=lf
+*.json text eol=lf
+*.neon text eol=lf
+*.xml text eol=lf
+*.yml text eol=lf
+
+# Never exported to a `composer require` install or a GitHub archive.
+/.github export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/.php-cs-fixer.dist.php export-ignore
+/examples export-ignore
+/phpstan.neon export-ignore
+/phpunit.xml export-ignore
+/tests export-ignore
