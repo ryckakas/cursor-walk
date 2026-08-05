@@ -154,16 +154,15 @@ final class ConnectionFormatterTest extends TestCase
 
     #[Test]
     #[DataProvider('hasNextPageProvider')]
-    public function hasNextPageMirrorsThePageAndHasPreviousPageIsAlwaysFalse(bool $hasNextPage): void
+    public function hasNextPageMirrorsThePage(bool $hasNextPage): void
     {
-        // Case 12: hasNextPage mirrors Page::$hasNextPage; hasPreviousPage is false in v1.
+        // Case 12: hasNextPage mirrors Page::$hasNextPage.
         $formatter = new ConnectionFormatter();
         $page = $this->pageOf(['a', 'b'], $hasNextPage ? 'next-page-cursor' : null, $hasNextPage);
 
         $pageInfo = self::pageInfoOf($formatter->format($page));
 
         self::assertSame($hasNextPage, $pageInfo['hasNextPage']);
-        self::assertFalse($pageInfo['hasPreviousPage'], 'hasPreviousPage is always false in v1');
     }
 
     /**
@@ -175,6 +174,89 @@ final class ConnectionFormatterTest extends TestCase
             'more pages follow' => [true],
             'last page' => [false],
         ];
+    }
+
+    // ------------------------------------------------------------------
+    // hasPreviousPage — derived from the page's own start position
+    // ------------------------------------------------------------------
+
+    /**
+     * Every kind of `$pageStartCursor` a caller can legitimately pass, and whether
+     * it proves something precedes the window.
+     *
+     * @return iterable<string, array{0: ?string, 1: bool}>
+     */
+    public static function pageStartCursorProvider(): iterable
+    {
+        $codec = new CursorCodec();
+
+        yield 'omitted entirely' => [null, false];
+        yield 'the empty string a resolver produces for an absent `after`' => ['', false];
+        yield 'an encoded origin with nothing skipped' => [$codec->encode(null, 0), false];
+        yield 'an encoded origin with items skipped' => [$codec->encode(null, 3), true];
+        yield 'an encoded position inside a later page' => [$codec->encode('page-2-cursor', 0), true];
+        yield 'an encoded position mid later page' => [$codec->encode('page-2-cursor', 4), true];
+        yield 'a raw upstream cursor' => ['b2Zmc2V0LTQ=', true];
+        yield 'a bare page number from CursorWalk\Offset' => ['3', true];
+    }
+
+    #[Test]
+    #[DataProvider('pageStartCursorProvider')]
+    public function hasPreviousPageIsTrueForEveryStartPositionThatIsNotTheOrigin(
+        ?string $pageStartCursor,
+        bool $expected,
+    ): void {
+        // A non-origin start position is PROOF that elements precede the window,
+        // which the Relay spec allows a server to report whenever it can determine
+        // it efficiently. Before this, every page after the first lied.
+        //
+        // The `encode(null, 0)` case is why this cannot be a bare "is the string
+        // non-empty?" check: the documented resolver recipe passes exactly that for
+        // a first request, and it must still report false.
+        $formatter = new ConnectionFormatter();
+        $page = $this->pageOf(['a', 'b'], 'next-page-cursor', true);
+
+        $pageInfo = self::pageInfoOf($formatter->format($page, null, $pageStartCursor));
+
+        self::assertSame($expected, $pageInfo['hasPreviousPage']);
+    }
+
+    #[Test]
+    public function hasPreviousPageIsIndependentOfWhetherThePageItselfHasItems(): void
+    {
+        // An empty page fetched with a real cursor still has something before it —
+        // the emptiness says nothing about the window's position in the stream.
+        $result = (new ConnectionFormatter())->format(Page::empty(), null, 'some-upstream-cursor');
+        $pageInfo = self::pageInfoOf($result);
+
+        self::assertSame([], self::edgesOf($result));
+        self::assertTrue($pageInfo['hasPreviousPage']);
+        self::assertNull($pageInfo['startCursor'], 'an empty page still has no first edge to point at');
+    }
+
+    #[Test]
+    public function walkingAStreamReportsHasPreviousPageFalseOnlyForTheFirstWindow(): void
+    {
+        // End to end over a real walk: format each window with the cursor it was
+        // fetched with, and only the origin window may claim nothing precedes it.
+        $fetcher = new ArrayFetcher(self::ALPHABET, pageSize: 4);
+        $formatter = new ConnectionFormatter();
+
+        $flags = [];
+        $fetchedWith = null;
+
+        while (true) {
+            $page = $fetcher->fetchPage($fetchedWith);
+            $flags[] = self::pageInfoOf($formatter->format($page, null, $fetchedWith))['hasPreviousPage'];
+
+            if (!$page->hasNextPage) {
+                break;
+            }
+
+            $fetchedWith = $page->endCursor;
+        }
+
+        self::assertSame([false, true, true], $flags, 'nine items at page size four is three windows');
     }
 
     #[Test]
@@ -581,7 +663,10 @@ final class ConnectionFormatterTest extends TestCase
             "a slice's own encoded end position is passed straight through as pageInfo.endCursor",
         );
         self::assertSame($slice->hasNextPage, $pageInfo['hasNextPage']);
-        self::assertFalse($pageInfo['hasPreviousPage']);
+        self::assertFalse(
+            $pageInfo['hasPreviousPage'],
+            'no $pageStartCursor was passed, so the page is positioned as though it began the stream',
+        );
     }
 
     // ------------------------------------------------------------------

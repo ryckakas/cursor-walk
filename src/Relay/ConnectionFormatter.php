@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CursorWalk\Relay;
 
+use CursorWalk\CursorCodec;
 use CursorWalk\Page;
 
 /**
@@ -28,9 +29,13 @@ final class ConnectionFormatter
 {
     /**
      * @param EdgeCursorStrategy $edgeCursorStrategy how per-edge cursors are derived
+     * @param CursorCodec        $codec              position codec, used to read
+     *                                               `$pageStartCursor` when deciding
+     *                                               `pageInfo.hasPreviousPage`
      */
     public function __construct(
         private readonly EdgeCursorStrategy $edgeCursorStrategy = new OffsetEdgeCursorStrategy(),
+        private readonly CursorCodec $codec = new CursorCodec(),
     ) {
     }
 
@@ -83,8 +88,20 @@ final class ConnectionFormatter
      * repeatedly replaying from the origin.
      *
      * `startCursor` is the first edge's cursor, per the Relay spec.
-     * `hasPreviousPage` is always `false`: v1 is forward-only, so the engine
-     * never learns whether anything precedes the window.
+     *
+     * ## `pageInfo.hasPreviousPage`
+     *
+     * `true` exactly when `$pageStartCursor` describes a position other than the
+     * origin — a non-null page anchor, or a non-zero offset into the first page.
+     * Both are proof that something precedes this window, and the Relay spec
+     * permits reporting `true` whenever the server can determine that
+     * efficiently, which here costs one `decode()`.
+     *
+     * This is NOT backward pagination: it reports a fact the engine already holds
+     * and adds no way to travel backwards. Note the argument it depends on —
+     * omitting `$pageStartCursor` positions the page as though it began the
+     * stream, so `hasPreviousPage` comes back `false` for it, exactly as edge
+     * cursors are anchored to the origin.
      *
      * @template T
      *
@@ -114,13 +131,15 @@ final class ConnectionFormatter
             ];
         }
 
+        [$anchor, $offset] = $this->codec->decode($pageStartCursor ?? '');
+
         $connection = [
             'edges' => $edges,
             'pageInfo' => [
                 'endCursor' => $page->endCursor,
                 'hasNextPage' => $page->hasNextPage,
                 'startCursor' => $edges === [] ? null : $edges[0]['cursor'],
-                'hasPreviousPage' => false,
+                'hasPreviousPage' => $anchor !== null || $offset > 0,
             ],
         ];
 

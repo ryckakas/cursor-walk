@@ -431,6 +431,83 @@ final class PaginatorTest extends TestCase
     }
 
     #[Test]
+    public function pagesYieldsTheOffendingPageBeforeLoopDetectionRejectsIt(): void
+    {
+        // CHARACTERIZATION TEST — this pins an ORDER, not just an outcome.
+        //
+        // The page whose endCursor repeats is handed to the consumer BEFORE
+        // PaginationLoopException is thrown. That is contract, not accident: the
+        // page's items are valid data already paid for, and a consumer that
+        // checkpoints per page must observe it — otherwise the resume cursor it
+        // stores is behind the data it has, and the walk replays items after the
+        // bug is fixed upstream.
+        //
+        // self::pagesThrowsOnARepeatedCursor() cannot catch a regression here: it
+        // collects pages but asserts only on the message and the fetch count,
+        // both of which survive moving loop detection above the yield.
+        $fetcher = new LoopingFetcher();
+
+        /** @var list<Page<string>> $yielded */
+        $yielded = [];
+
+        try {
+            foreach ((new Paginator())->pages($fetcher) as $page) {
+                $yielded[] = $page;
+
+                if (count($yielded) > 5) {
+                    break; // safety net; the assertions below are the real check
+                }
+            }
+
+            self::fail('pages() must reject an upstream that keeps handing back the same cursor.');
+        } catch (PaginationLoopException) {
+            // expected — the assertions are about what was yielded first
+        }
+
+        self::assertCount(
+            2,
+            $yielded,
+            'page 1 hands out the cursor, page 2 hands it out again — and page 2 must still reach '
+            . 'the consumer before the loop guard fires',
+        );
+        self::assertSame(
+            $fetcher->stuckCursor(),
+            $yielded[1]->endCursor,
+            'the last yielded page is the one carrying the repeated cursor',
+        );
+        self::assertSame(['item-2'], $yielded[1]->items, 'its items are real data and must not be discarded');
+    }
+
+    #[Test]
+    public function pagesYieldsAPageThatPointsBackAtTheStartCursorBeforeRejectingIt(): void
+    {
+        // CHARACTERIZATION TEST, resumed-walk variant: $startCursor is pre-seeded
+        // into the seen set, so the FIRST fetched page already trips the guard.
+        // It must still be yielded first.
+        $fetcher = new LoopingFetcher();
+
+        /** @var list<Page<string>> $yielded */
+        $yielded = [];
+
+        try {
+            foreach ((new Paginator())->pages($fetcher, $fetcher->stuckCursor()) as $page) {
+                $yielded[] = $page;
+
+                if (count($yielded) > 5) {
+                    break;
+                }
+            }
+
+            self::fail('a page pointing back at $startCursor must be rejected.');
+        } catch (PaginationLoopException $exception) {
+            self::assertStringContainsString($fetcher->stuckCursor(), $exception->getMessage());
+        }
+
+        self::assertCount(1, $yielded, 'the page that closed the loop is yielded, then rejected');
+        self::assertSame(['item-1'], $yielded[0]->items);
+    }
+
+    #[Test]
     public function itemsThrowsOnARepeatedCursor(): void
     {
         // spec case 8 — items() delegates to pages(), so the guard must carry over
