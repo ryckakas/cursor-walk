@@ -12,7 +12,8 @@ use CursorWalk\Exception\PaginationLoopException;
  * lazy page iteration, or an exact bounded slice.
  *
  * Stateless and immutable — a single instance is safe to share, reuse and run
- * concurrently. All walk state lives inside the returned generators.
+ * concurrently. All walk state lives inside the returned generators: each one
+ * holds its own {@see Walk}, so concurrent walks cannot interfere.
  *
  * Three methods, deliberately:
  *  - {@see self::items()}  — lazy item iteration (the common case);
@@ -21,6 +22,11 @@ use CursorWalk\Exception\PaginationLoopException;
  *
  * `items()` and `slice()` both delegate to `pages()`, so the safety guards below
  * apply uniformly to all three.
+ *
+ * This is the class to use. {@see Walk} holds the same policy as a stepper you
+ * drive yourself, for the one case this cannot serve: a caller that is unable to
+ * let the library call `fetchPage()` at all — a workflow engine, an event loop, a
+ * Fiber.
  */
 final class Paginator
 {
@@ -151,8 +157,9 @@ final class Paginator
      *  - throw {@see PageBudgetExceededException} once `$maxPages` pages have
      *    been fetched and the upstream still reports more.
      *
-     * All guard state is local to the generator, so the paginator stays
-     * stateless and concurrent walks cannot interfere.
+     * All guard state is local to the generator — it lives in the {@see Walk} this
+     * method drives — so the paginator stays stateless and concurrent walks cannot
+     * interfere.
      *
      * @template T
      *
@@ -166,51 +173,18 @@ final class Paginator
      */
     public function pages(PaginatedFetcher $fetcher, ?string $startCursor = null): \Generator
     {
-        $cursor = $startCursor;
-        $fetched = 0;
+        $walk = new Walk($startCursor, $this->maxPages);
 
-        /** @var array<string, true> $seen */
-        $seen = [];
-        if ($startCursor !== null) {
-            $seen[$startCursor] = true;
-        }
-
-        while (true) {
-            if ($this->maxPages !== null && $fetched >= $this->maxPages) {
-                throw PageBudgetExceededException::exceeded($this->maxPages, $cursor);
-            }
-
-            $page = $fetcher->fetchPage($cursor);
-            ++$fetched;
+        while ($walk->hasNext()) {
+            // The budget throws here, before the fetch — so its exception carries a
+            // cursor nobody has paid for. The page is then yielded BEFORE
+            // advance() runs loop detection on it: the offending page's items are
+            // valid data, and a checkpointing consumer must observe them.
+            $page = $fetcher->fetchPage($walk->nextCursor());
 
             yield $page;
 
-            if (!$page->hasNextPage) {
-                return;
-            }
-
-            $next = $page->endCursor;
-
-            // Unreachable through Page: its constructor rejects hasNextPage=true
-            // with a null/empty endCursor, so by this line $next is always a
-            // usable cursor. The check stays as a belt-and-braces stop — without
-            // it, any future path that produced such a page (a subclass-free
-            // reflection hack, an unserialize(), a relaxation of that
-            // validation) would spin forever re-fetching the same cursor.
-            // Terminating is the safe degradation. Excluded from coverage
-            // because exercising it would mean constructing an illegal Page.
-            // @codeCoverageIgnoreStart
-            if ($next === null || $next === '') {
-                return;
-            }
-            // @codeCoverageIgnoreEnd
-
-            if (isset($seen[$next])) {
-                throw PaginationLoopException::repeatedCursor($next);
-            }
-            $seen[$next] = true;
-
-            $cursor = $next;
+            $walk->advance($page);
         }
     }
 
