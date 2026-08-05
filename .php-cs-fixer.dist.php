@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 $dirs = array_filter(
-    ['src', 'tests', 'examples'],
+    ['src', 'tests', 'examples', 'tools'],
     static fn (string $dir): bool => is_dir(__DIR__ . '/' . $dir)
 );
 

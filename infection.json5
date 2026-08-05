@@ -1,0 +1,36 @@
+{
+    // Mutation testing: change the source in small ways and check the suite
+    // notices. Line coverage says a line ran; MSI says an assertion cared.
+    //
+    // This exists because of a concrete miss: at 99% line coverage, the 0.1.0
+    // suite still passed with Paginator's loop guard hoisted above its yield —
+    // the ordering the engine depends on was not pinned by anything. That was
+    // found by hand-mutating the file. Infection automates that class of check.
+    $schema: 'vendor/infection/infection/resources/schema.json',
+    source: {
+        directories: [
+            'src',
+        ],
+    },
+    mutators: {
+        '@default': true,
+    },
+    logs: {
+        text: 'build/infection/infection.log',
+        // Escaped mutants only, for reading in a CI log without the noise of
+        // the thousands that were killed.
+        summary: 'build/infection/summary.log',
+        // Annotates surviving mutants on the PR diff itself, so an escaped
+        // mutant is visible where the change was made rather than in a log.
+        github: true,
+    },
+    // Floors, not aspirations: CI fails below these.
+    //   minMsi        — of all mutants generated.
+    //   minCoveredMsi — of mutants on lines the suite actually covers, which is
+    //                   the number that reflects assertion strength.
+    minMsi: 80,
+    minCoveredMsi: 80,
+    // A mutant that hangs is a mutant the suite did not kill. The full suite runs
+    // in well under a second, so 10s per mutant is generous.
+    timeout: 10,
+}

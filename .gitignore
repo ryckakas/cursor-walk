@@ -3,6 +3,11 @@
 /.phpunit.cache/
 /.phpunit.result.cache
 
+# Coverage and mutation-testing artifacts
+/build/
+/.infection/
+/infection.log
+
 # Libraries do not commit the lock file; consumers resolve their own versions.
 composer.lock
 

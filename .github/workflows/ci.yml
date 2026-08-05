@@ -7,6 +7,20 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Every step below is a BLOCKER. No step carries continue-on-error, so a non-zero
+# exit fails the job, and these job names are required status checks on main
+# (`gh api repos/:owner/:repo/branches/main/protection`). Exit codes worth
+# knowing: php-cs-fixer --dry-run returns 8 when a file needs fixing, phpstan
+# returns 1 on any finding, phpunit returns non-zero on failures — and, because
+# phpunit.xml sets failOnWarning / failOnRisky / failOnDeprecation, on those too.
+#
+# If a job here is ever renamed, update the required-checks list in the branch
+# protection settings in the SAME change: a required check that no longer matches
+# a job name silently stops being required, and PRs become mergeable with no CI.
+
+permissions:
+  contents: read
+
 jobs:
   tests:
     name: PHP ${{ matrix.php }}
@@ -14,7 +28,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.2', '8.3', '8.4']
+        # composer.json allows php >=8.2, so every released version it permits is
+        # tested. Add the next minor here on its release day, not after a bug
+        # report from someone running it.
+        php: ['8.2', '8.3', '8.4', '8.5']
 
     steps:
       - name: Checkout
@@ -33,17 +50,39 @@ jobs:
       - name: Install dependencies
         uses: ramsey/composer-install@v3
 
-      # Every check below is the composer script a contributor runs locally, so
-      # `composer check` reproduces CI exactly. Extra flags are forwarded with
-      # `--` instead of being duplicated into a divergent raw command.
+      # Dev dependencies are pinned to exact versions, which is what makes an
+      # advisory against one actionable instead of "probably already fixed".
+      - name: Audit dependencies
+        run: composer audit
+
+      # Every check below is the composer script a contributor runs locally:
+      # `composer check` reproduces the fast gates, `composer check:ci` all of
+      # them. Extra flags are forwarded with `--` rather than duplicated into a
+      # divergent raw command.
       - name: Check code style
         run: composer cs
 
       - name: Static analysis
         run: composer stan -- --no-progress
 
-      - name: Run tests
-        run: composer test -- --coverage-text
+      # Runs the suite, writes Clover, and fails below the line-coverage floor in
+      # tools/check-coverage.php. Printing the percentage and moving on let it rot.
+      - name: Tests and coverage floor
+        run: composer coverage
+
+      # Line coverage proves a line executed; MSI proves an assertion noticed it
+      # changing. Floors live in infection.json5.
+      - name: Mutation testing
+        run: composer mutation
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infection-report-php-${{ matrix.php }}
+          path: build/infection/
+          if-no-files-found: ignore
+          retention-days: 14
 
       # The offline example is the acceptance-gate smoke test: zero network,
       # zero configuration. examples/github-api-example.php is deliberately NOT

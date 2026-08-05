@@ -1,0 +1,36 @@
+version: 2
+
+# Dev dependencies are pinned to exact versions (no carets), which trades
+# "silently drifts" for "never moves". Dependabot is the other half of that
+# trade: it proposes each bump as its own PR, CI runs the full gate against it,
+# and the pin is updated deliberately instead of at install time.
+#
+# There are no runtime dependencies to watch — `require` is `php` alone.
+updates:
+  - package-ecosystem: composer
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+    labels:
+      - dependencies
+    groups:
+      # One PR for the toolchain rather than four: they are all dev-only, and
+      # reviewing them together is how they get exercised together.
+      dev-tooling:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: build
+    labels:
+      - dependencies
