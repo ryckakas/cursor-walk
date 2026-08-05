@@ -436,6 +436,14 @@ with.
 The third rule costs one wasted round trip when the final page happens to be exactly full: the
 next fetch comes back empty and ends the walk. A wasted call, never a missed row.
 
+**Report the signal that matches your fetcher's unit** — `totalPages` from a `PageNumberFetcher`,
+`totalItems` from an `OffsetFetcher`. Those are exact. The cross-unit combination is not wrong,
+only approximate: comparing a row count against a page number assumes every page is full. That
+becomes a requirement rather than a preference if your upstream returns **short mid-stream pages**
+(anything post-filtering a page server-side), because no other signal can tell a filtered page
+from the last one — rule three ends the walk at the first one, and a mismatched total runs ahead
+of the rows actually read.
+
 Because `hasNextPage` is *derived* rather than read from the envelope, the inconsistency a
 hand-rolled guard would look for — an envelope claiming more data past its own `totalPages` —
 is definitionally impossible here. The redundant degree of freedom is gone rather than guarded.

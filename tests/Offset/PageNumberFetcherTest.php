@@ -249,6 +249,95 @@ final class PageNumberFetcherTest extends TestCase
         self::assertSame([3], $fetcher->requested(), 'page 3 is the last page; nothing may follow it');
     }
 
+    /**
+     * A page-numbered upstream that post-filters server-side: FOUR pages of 2 rows
+     * each, out of the 3 rows per page that were requested.
+     *
+     * @param TotalsReporting $reporting which signal the envelope exposes
+     *
+     * @return PageNumberFetcher<string>
+     */
+    private static function filteringUpstream(TotalsReporting $reporting): PageNumberFetcher
+    {
+        /** @extends PageNumberFetcher<string> */
+        return new class (3, $reporting) extends PageNumberFetcher {
+            private const PAGES = 4;
+
+            private const ROWS_PER_PAGE = 2;
+
+            public function __construct(int $pageSize, private readonly TotalsReporting $reporting)
+            {
+                parent::__construct($pageSize);
+            }
+
+            protected function fetchAt(int $position, int $pageSize): OffsetPage
+            {
+                $rows = $position <= self::PAGES ? ['p' . $position . 'a', 'p' . $position . 'b'] : [];
+
+                return new OffsetPage(
+                    $rows,
+                    totalItems: $this->reporting === TotalsReporting::TotalItems
+                        ? self::PAGES * self::ROWS_PER_PAGE
+                        : null,
+                    totalPages: $this->reporting === TotalsReporting::TotalPages ? self::PAGES : null,
+                );
+            }
+        };
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function filteredRows(int $throughPage): array
+    {
+        $rows = [];
+
+        for ($page = 1; $page <= $throughPage; ++$page) {
+            $rows[] = 'p' . $page . 'a';
+            $rows[] = 'p' . $page . 'b';
+        }
+
+        return $rows;
+    }
+
+    #[Test]
+    public function totalPagesIsTheOnlySignalThatWalksAnUpstreamWithShortMidStreamPages(): void
+    {
+        // A page count is exact for a page-numbered fetcher however many rows each
+        // page holds, so it reads a filtered stream all the way to its end.
+        $items = iterator_to_array(
+            (new Paginator())->items(self::filteringUpstream(TotalsReporting::TotalPages)),
+            false,
+        );
+
+        self::assertSame(self::filteredRows(4), $items);
+    }
+
+    #[Test]
+    public function theOtherSignalsStopEarlyOnAnUpstreamWithShortMidStreamPages(): void
+    {
+        // Pinned so the limitation is a known shape rather than a surprise. A row
+        // count has to be compared against a page number here, so short pages make
+        // it run ahead of the rows actually read; with no totals at all, a short page
+        // is indistinguishable from the last one. Both stop early, which is exactly
+        // why the class docblock asks for totalPages.
+        $withRowCount = iterator_to_array(
+            (new Paginator())->items(self::filteringUpstream(TotalsReporting::TotalItems)),
+            false,
+        );
+        $withNothing = iterator_to_array(
+            (new Paginator())->items(self::filteringUpstream(TotalsReporting::Neither)),
+            false,
+        );
+
+        self::assertSame(
+            self::filteredRows(3),
+            $withRowCount,
+            'by page 3 the derived count claims 8 of 8 rows read, though only 6 were',
+        );
+        self::assertSame(self::filteredRows(1), $withNothing, 'the first short page reads as terminal');
+    }
+
     // ------------------------------------------------------------------
     // Interfaces — the engine's own surface over a page-numbered upstream
     // ------------------------------------------------------------------

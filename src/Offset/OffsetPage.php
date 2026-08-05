@@ -62,7 +62,25 @@ final class OffsetPage
      *
      * Both position arguments are ABSOLUTE within the result set rather than
      * counted from the start of this walk, which is what keeps the comparisons
-     * correct for a walk resumed from a checkpoint.
+     * correct for a walk resumed from a checkpoint. The price of being stateless is
+     * that a fetcher can only derive the position in its own unit exactly:
+     *
+     * | signal       | exact for                | assumes uniform pages for |
+     * |--------------|--------------------------|---------------------------|
+     * | `totalPages` | {@see PageNumberFetcher} | {@see OffsetFetcher}      |
+     * | `totalItems` | {@see OffsetFetcher}     | {@see PageNumberFetcher}  |
+     *
+     * So report the signal that matches your fetcher's own unit whenever the
+     * envelope has it. The cross-unit combination is not wrong, only approximate:
+     * it holds as long as every page is full.
+     *
+     * That matters most for an upstream returning SHORT mid-stream pages — anything
+     * post-filtering a page server-side. There, the matching signal is not a
+     * preference but a requirement: without it a short page is indistinguishable
+     * from the last one, so rule three ends the walk at the first filtered page,
+     * while the mismatched total runs ahead of the rows actually read and ends it
+     * early too. `totalPages` from a {@see PageNumberFetcher} (or `totalItems` from
+     * an {@see OffsetFetcher}) is exact regardless of how many rows each page holds.
      *
      * @param int $pageNumber   1-based ordinal of this page within the result set
      * @param int $itemsThrough rows in the result set up to and including this page
