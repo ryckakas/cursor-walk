@@ -493,6 +493,42 @@ final class PageNumberFetcherTest extends TestCase
         new PageNumberApiFetcher(self::rows(5), $pageSize);
     }
 
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function malformedCursorProvider(): iterable
+    {
+        yield 'trailing newline' => ["5\n"];
+        yield 'leading whitespace' => [' 5'];
+        yield 'just past the addressable maximum' => [(string) (intdiv(\PHP_INT_MAX, 3))];
+        yield 'saturating the int cast' => ['9999999999999999999'];
+    }
+
+    #[Test]
+    #[DataProvider('malformedCursorProvider')]
+    public function aCursorThatWouldOverflowThePositionArithmeticIsRejected(string $cursor): void
+    {
+        // Page numbers are multiplied by the page size to reach a row count, so they
+        // overflow to float an order of magnitude sooner than a raw offset does.
+        // Unguarded that float hits OffsetPage's int parameters as a TypeError, and
+        // the upstream has already been called with the absurd page number by then.
+        $fetcher = new PageNumberApiFetcher(self::rows(5), 3);
+
+        $this->expectException(MalformedPageException::class);
+
+        $fetcher->fetchPage($cursor);
+    }
+
+    #[Test]
+    public function theLargestAddressablePageNumberIsStillAccepted(): void
+    {
+        $fetcher = new PageNumberApiFetcher(self::rows(5), 3);
+
+        $page = $fetcher->fetchPage((string) (intdiv(\PHP_INT_MAX, 3) - 1));
+
+        self::assertSame([], $page->items);
+    }
+
     #[Test]
     public function aRunawayEnvelopeIsStoppedByThePageBudgetBecauseLoopDetectionCannotFire(): void
     {

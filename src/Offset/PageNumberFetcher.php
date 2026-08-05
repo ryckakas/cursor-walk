@@ -63,11 +63,10 @@ use CursorWalk\Page;
  * offsets.
  *
  * The same coupling reaches the terminal condition, so **report `totalPages` from
- * this fetcher whenever the envelope has it** — it is exact, whereas a row count
- * can only be compared against a page number by assuming every page is full. For
- * an upstream returning SHORT mid-stream pages (anything post-filtering a page
- * server-side) that is a requirement rather than a preference: no other signal can
- * tell a filtered page from the last one. See {@see OffsetPage::hasMoreAfter()}.
+ * this fetcher whenever the envelope has it** — it is the signal that matches this
+ * fetcher's unit. {@see OffsetPage::hasMoreAfter()} states what the alternatives
+ * cost, and why the match stops being a preference and becomes a requirement once
+ * mid-stream pages can come back short.
  *
  * ## Repeated-cursor detection is INERT here — read this
  *

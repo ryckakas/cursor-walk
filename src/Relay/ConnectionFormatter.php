@@ -91,11 +91,18 @@ final class ConnectionFormatter
      *
      * ## `pageInfo.hasPreviousPage`
      *
-     * `true` exactly when `$pageStartCursor` describes a position other than the
-     * origin — a non-null page anchor, or a non-zero offset into the first page.
-     * Both are proof that something precedes this window, and the Relay spec
-     * permits reporting `true` whenever the server can determine that
-     * efficiently, which here costs one `decode()`.
+     * `true` when `$pageStartCursor` decodes to a position other than the origin —
+     * a non-null page anchor, or a non-zero offset into the first page. Both are
+     * proof that something precedes this window, and the Relay spec permits
+     * reporting `true` whenever the server can determine that efficiently, which
+     * here costs one `decode()`.
+     *
+     * It reads the cursor as the codec does, not as any one fetcher does. A bare
+     * positional cursor decodes to a non-null anchor whatever integer it holds, so
+     * `'0'` — the {@see \CursorWalk\Offset\OffsetFetcher} origin — reports `true`.
+     * Teaching this formatter that some anchors are really origins would put one
+     * fetcher's wire format inside the Relay layer; passing `null` for the first
+     * page, as the documented recipes do, is the fix on the caller's side.
      *
      * This is NOT backward pagination: it reports a fact the engine already holds
      * and adds no way to travel backwards. Note the argument it depends on —
