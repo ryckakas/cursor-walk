@@ -1,3 +1,5 @@
+![cursor-walk](.github/images/cover-hero.jpg)
+
 # cursor-walk
 
 **The fetching half of cursor pagination.** `cursor-walk` walks a paginated upstream — a REST
