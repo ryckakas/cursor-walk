@@ -112,18 +112,29 @@ change that teaches the engine to interpret cursor contents is a design regressi
 
 ### Where the contracts live
 
-The documented contract is the **class docblocks**. Everything else mirrors them:
+The behaviour is pinned by the tests; the prose lives in Markdown, not in the code:
 
 - `README.md` is the landing page: pitch, install, quick start, the three methods, and links. Keep
   it short; secondary detail goes in a `<details>` block, and anything longer goes in `docs/`.
 - `docs/recipes.md` holds the how-to recipes, and `docs/design.md` the trade-offs (guards, cursor
   stability, non-goals, similar packages). The README links to their headings, so renaming one
   breaks a link.
+- The invariants above are the ones a change is most likely to break; keep them here.
 - `ROADMAP.md` is what comes next; `CHANGELOG.md` is the behavioural record.
 
-When changing behaviour, update the docblock first — it is the source, not commentary — then the
-doc that mirrors it. Docblocks here are long on purpose: they carry invariants, trade-offs, and
-traps. Inline comments still follow the usual bar (why, not what).
+When changing behaviour, update the doc that describes it and the CHANGELOG in the same change.
+
+### Comments
+
+The owner's rule: **no comment unless it explains why, and none longer than 3 lines.**
+
+- A comment that restates the code, narrates steps or tells history is deleted, not trimmed.
+- Public API docblocks in `src/` carry their PHPStan tags and at most a 3-line summary: what the
+  element is for, or the one trap a caller must know. Private members get tags only, or nothing.
+- Type-bearing tags (`@template`, generic `@param`/`@return`/`@var`, `@implements`, `@throws`,
+  `@phpstan-ignore` with its reason) are not prose; PHPStan at level max needs them.
+- Tests may keep one-line section markers; the test name, a full sentence, states the claim.
+- The same applies to YAML, NEON, JSON5 and dotfiles.
 
 ## Testing
 

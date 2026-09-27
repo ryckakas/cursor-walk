@@ -8,10 +8,8 @@ use CursorWalk\Page;
 use CursorWalk\PaginatedFetcher;
 
 /**
- * Spy decorator around any {@see PaginatedFetcher}.
- *
- * Records how many times fetchPage() was called and which cursor each call
- * received, which is what the laziness tests assert on.
+ * Spy decorator around any {@see PaginatedFetcher} that records every cursor
+ * fetchPage() received, for the laziness tests.
  *
  * @template T
  *
@@ -45,8 +43,6 @@ final class CountingFetcher implements PaginatedFetcher
     }
 
     /**
-     * Every cursor received, in call order. `null` is the first-page fetch.
-     *
      * @return list<?string>
      */
     public function cursors(): array

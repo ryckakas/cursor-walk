@@ -7,27 +7,17 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Every step below is a BLOCKER. No step carries continue-on-error, so a non-zero
-# exit fails the job, and these job names are required status checks on main
-# (`gh api repos/:owner/:repo/branches/main/protection`). Exit codes worth
-# knowing: php-cs-fixer --dry-run returns 8 when a file needs fixing, phpstan
-# returns 1 on any finding, phpunit returns non-zero on failures — and, because
-# phpunit.xml sets failOnWarning / failOnRisky / failOnDeprecation, on those too.
-#
-# If a job here is ever renamed, update the required-checks list in the branch
-# protection settings in the SAME change: a required check that no longer matches
-# a job name silently stops being required, and PRs become mergeable with no CI.
-#
-# Actions are pinned to a full commit SHA with the release in a trailing comment;
-# a tag can be moved to other code after review, a commit cannot. Dependabot
-# moves both together. The "Workflow security" job below enforces all of this.
+# Every job name here is a required check on main. Renaming one silently stops
+# requiring it, so update branch protection in the same change.
 
-# Every job only reads the checkout: nothing here pushes, comments or publishes.
+# Actions are pinned to a commit SHA because a tag can be moved after review.
+
+# Read-only: nothing here pushes, comments or publishes.
 permissions:
   contents: read
 
-# A new push to a PR makes the previous run's result irrelevant. A push to main
-# is never cancelled, so every merged commit keeps a complete result.
+# A new push makes a PR's previous run irrelevant. Main is never cancelled, so
+# every merged commit keeps a complete result.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -39,9 +29,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # composer.json allows php >=8.2, so every released version it permits is
-        # tested. Add the next minor here on its release day, not after a bug
-        # report from someone running it.
+        # Every version composer.json allows. Add the next minor on its release day,
+        # not after a bug report from someone running it.
         php: ['8.2', '8.3', '8.4', '8.5']
 
     steps:
@@ -63,28 +52,23 @@ jobs:
       - name: Install dependencies
         uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
 
-      # Dev dependencies are pinned to exact versions, which is what makes an
-      # advisory against one actionable instead of "probably already fixed".
+      # Exact dev pins make an advisory against one actionable.
       - name: Audit dependencies
         run: composer audit
 
-      # Every check below is the composer script a contributor runs locally:
-      # `composer check` reproduces the fast gates, `composer check:ci` all of
-      # them. Extra flags are forwarded with `--` rather than duplicated into a
-      # divergent raw command.
+      # Each check is the composer script contributors run locally, with extra flags
+      # passed after `--`, so CI and a local run cannot drift apart.
       - name: Check code style
         run: composer cs
 
       - name: Static analysis
         run: composer stan -- --no-progress
 
-      # Runs the suite, writes Clover, and fails below the line-coverage floor in
-      # tools/check-coverage.php. Printing the percentage and moving on let it rot.
+      # A floor rather than a printed percentage, which let coverage rot.
       - name: Tests and coverage floor
         run: composer coverage
 
-      # Line coverage proves a line executed; MSI proves an assertion noticed it
-      # changing. Floors live in infection.json5.
+      # Coverage proves a line ran; mutation testing proves an assertion noticed it change.
       - name: Mutation testing
         run: composer mutation
 
@@ -97,17 +81,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      # The offline example is the acceptance-gate smoke test: zero network,
-      # zero configuration. examples/github-api-example.php is deliberately NOT
-      # run here — it talks to the live GitHub API and is best-effort by design.
+      # The GitHub example is not run: it hits the live API and is best-effort by design.
       - name: "Smoke test: offline example"
         run: php examples/offline-example.php
 
   complexity:
-    # Syntax-only, so it does not depend on the PHP version and runs once rather
-    # than per matrix entry. The threshold lives in bonsai-lint.toml, with no
-    # baseline of accepted findings; the version is pinned in the `complexity`
-    # composer script, and npx comes from the runner's Node.
+    # Syntax-only, so one run covers every PHP version.
     name: Cognitive complexity
     runs-on: ubuntu-latest
     steps:
@@ -127,25 +106,20 @@ jobs:
         run: composer complexity
 
   api:
-    # A release is a promise about the public API, so this compares the PR
-    # against the latest release tag and fails on any break of it. A break made
-    # on purpose is declared in the same change: recorded with its reason in
-    # .roave-backward-compatibility-check.xml, and listed in CHANGELOG.md, so the
-    # next tag is a breaking one (0.2.x to 0.3.0 while below 1.0). Tagging that
-    # release clears the file. AGENTS.md has the procedure.
+    # A release is a promise about the public API. An intentional break is declared
+    # in .roave-backward-compatibility-check.xml and CHANGELOG.md; see AGENTS.md.
     name: Public API
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The base is the latest release tag, so history and tags must be here.
+          # The comparison base is the latest release tag.
           fetch-depth: 0
           persist-credentials: false
 
-      # The checker needs PHP 8.4+, which the library itself does not, so it has
-      # its own composer.json and lock in tools/bc-check rather than a place in
-      # require-dev, where it would break the PHP 8.2 and 8.3 installs.
+      # The checker needs PHP 8.4+, so it lives in tools/bc-check; in require-dev it
+      # would break the PHP 8.2 and 8.3 installs.
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
@@ -163,8 +137,6 @@ jobs:
         run: composer bc -- --format=console --format=github-actions
 
   workflows:
-    # The workflows are audited like code: pinned actions, least-privilege
-    # tokens, no credentials left in the checkout, no template injection.
     name: Workflow security
     runs-on: ubuntu-latest
     steps:
@@ -173,15 +145,13 @@ jobs:
         with:
           persist-credentials: false
 
-      # An exact release: new audits arrive with a deliberate bump, not with an
-      # unrelated pull request.
+      # Exact release, so new audits arrive with a deliberate bump, not an unrelated PR.
       - name: Install zizmor
         uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: zizmor@1.30.1
 
-      # The token lets zizmor check that every pinned commit belongs to its
-      # action's repository and that no pinned release has a known advisory.
+      # The token lets zizmor verify that each pinned commit belongs to its action's repository.
       - name: zizmor
         run: zizmor --format github .github
         env:

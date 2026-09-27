@@ -8,61 +8,18 @@ use CursorWalk\Exception\PageBudgetExceededException;
 use CursorWalk\Exception\PaginationLoopException;
 
 /**
- * The walk engine: turns a {@see PaginatedFetcher} into lazy item iteration,
- * lazy page iteration, or an exact bounded slice.
- *
- * Stateless and immutable — a single instance is safe to share, reuse and run
- * concurrently. All walk state lives inside the returned generators: each one
- * holds its own {@see Walk}, so concurrent walks cannot interfere.
- *
- * Three methods, deliberately:
- *  - {@see self::items()}  — lazy item iteration (the common case);
- *  - {@see self::pages()}  — lazy page iteration (checkpointing, retry boundaries);
- *  - {@see self::slice()}  — exact eager slice (honouring a Relay `first` argument).
- *
- * `items()` and `slice()` both delegate to `pages()`, so the safety guards below
- * apply uniformly to all three.
- *
- * This is the class to use. {@see Walk} holds the same policy as a stepper you
- * drive yourself, for the one case this cannot serve: a caller that is unable to
- * let the library call `fetchPage()` at all — a workflow engine, an event loop, a
- * Fiber.
+ * The walk engine: turns a PaginatedFetcher into lazy items, lazy pages, or an
+ * exact bounded slice. Stateless and safe to share, since all walk state lives
+ * in the returned generators. Use Walk only when you cannot let it call fetchPage().
  */
 final class Paginator
 {
     /**
-     * ## The page budget — read this
+     * The page budget is the backstop against an upstream that emits fresh cursors
+     * forever. Lower it hard for interactive requests; for batch jobs, raise it and
+     * resume from PageBudgetExceededException::getLastCursor().
      *
-     * By default a walk is BOUNDED at 10,000 upstream fetches. Pass `null` to
-     * disable the bound.
-     *
-     * Repeated-cursor detection catches an upstream that hands back a cursor it
-     * already used. It cannot catch the other failure mode: an upstream that
-     * emits an ever-fresh cursor with `hasNextPage=true` forever. Without a
-     * budget, such an upstream turns a GraphQL resolver into an unbounded loop
-     * that exhausts the request timeout, the memory limit, or your API quota.
-     * The budget is the backstop.
-     *
-     * Sizing it:
-     *  - **Interactive requests (GraphQL resolvers, HTTP handlers):** lower it
-     *    hard — a few dozen pages. A user-facing request that needs thousands of
-     *    upstream round trips is already broken; prefer {@see self::slice()}.
-     *  - **Batch jobs / backfills:** raise it, or pass `null` and rely on
-     *    per-page checkpointing via {@see self::pages()}. Note that
-     *    repeated-cursor detection keeps every cursor seen, so guard memory is
-     *    O(pages fetched) — run a multi-million-page backfill as bounded
-     *    chunks resumed from checkpoints, not as one unbounded walk.
-     *
-     * When the budget runs out the engine throws
-     * {@see PageBudgetExceededException}, which carries the cursor of the page
-     * it did not fetch — pass that back as `$startCursor` (or `$pageCursor`) to
-     * resume with no gaps and no duplicates. Budget exhaustion is policy, not a
-     * bug, which is why it is a different exception class from
-     * {@see PaginationLoopException}.
-     *
-     * @param int|null    $maxPages maximum upstream fetches per walk; null disables the bound
-     * @param CursorCodec $codec    position codec used by {@see self::slice()} to
-     *                              encode mid-page end positions
+     * @param int|null $maxPages maximum upstream fetches per walk; null disables the bound
      */
     public function __construct(
         private readonly ?int $maxPages = 10_000,
@@ -71,44 +28,16 @@ final class Paginator
     }
 
     /**
-     * Lazily iterate every item across every page.
-     *
-     * Exactly one `fetchPage()` call per page, made only when iteration crosses
-     * a page boundary — so `foreach (... ) { break; }` after the first item
-     * costs exactly one fetch. Empty mid-stream pages are traversed invisibly.
-     *
-     * `$pageCursor` is both the start position and the resume/checkpoint
-     * mechanism: `null` walks from the beginning. `$skip` drops items from that
-     * start position, and is what a decoded synthetic edge cursor feeds in:
-     *
-     * ```php
-     * [$pageCursor, $skip] = $codec->decode($after);
-     * foreach ($paginator->items($fetcher, $pageCursor, $skip) as $item) { ... }
-     * ```
-     *
-     * In practice `$skip` is smaller than the first page, because it always
-     * originates as an offset within one page. Should it exceed that page's item
-     * count it carries over into the following pages rather than being silently
-     * dropped, so that a position remains a position no matter how the upstream
-     * chunks it. (This also keeps edge cursors correct for slices that span
-     * several upstream pages — see {@see Relay\OffsetEdgeCursorStrategy}.)
-     *
-     * ## Keys
-     *
-     * Keys are sequential from 0 across the WHOLE walk — they do not restart at
-     * each page boundary — so `iterator_to_array($paginator->items($f))` is safe
-     * and returns every item. (The generator yields items one at a time rather
-     * than `yield from`-ing each page's array, which would restart the implicit
-     * key counter per page and make that call silently drop items.) Keys count
-     * yielded items, so with `$skip` the first item still has key 0.
+     * Lazily iterate every item across every page, one fetch per page boundary.
+     * Keys run from 0 across the whole walk, so iterator_to_array() is safe.
+     * A `$skip` larger than the first page carries over into the next ones.
      *
      * @template T
      *
      * @param PaginatedFetcher<T> $fetcher
-     * @param string|null         $pageCursor start position; null = from the beginning
-     * @param int                 $skip       items to drop from the start position; negatives are clamped to 0
+     * @param int                 $skip    negatives are clamped to 0
      *
-     * @return \Generator<int, T> keys are sequential from 0 across all pages
+     * @return \Generator<int, T>
      *
      * @throws PaginationLoopException
      * @throws PageBudgetExceededException
@@ -132,11 +61,8 @@ final class Paginator
                 $remaining = 0;
             }
 
-            // Deliberately NOT `yield from $items`: that would restart the
-            // implicit key counter at 0 on every page, so a caller using
-            // iterator_to_array() without $preserve_keys=false would silently
-            // keep only the last page's worth of items. See the "Keys" section
-            // in this method's docblock.
+            // Not `yield from $items`: that restarts keys at 0 on every page, so
+            // iterator_to_array() would silently keep only the last page.
             foreach ($items as $item) {
                 yield $item;
             }
@@ -144,42 +70,27 @@ final class Paginator
     }
 
     /**
-     * Lazily iterate whole pages.
-     *
-     * This is the checkpointing primitive: each yielded page is a natural retry
-     * boundary for batch jobs and workflow engines, and `$page->endCursor` is a
-     * durable resume token. Empty mid-stream pages are yielded as-is.
-     *
-     * Guards applied while walking:
-     *  - stop as soon as a page reports `hasNextPage === false`;
-     *  - throw {@see PaginationLoopException} if a cursor is handed out twice
-     *    (including a page pointing back at `$startCursor`);
-     *  - throw {@see PageBudgetExceededException} once `$maxPages` pages have
-     *    been fetched and the upstream still reports more.
-     *
-     * All guard state is local to the generator — it lives in the {@see Walk} this
-     * method drives — so the paginator stays stateless and concurrent walks cannot
-     * interfere.
+     * Lazily iterate whole pages: the checkpointing primitive. Each page is a
+     * retry boundary and its endCursor a durable resume token. Empty mid-stream
+     * pages are yielded as-is.
      *
      * @template T
      *
      * @param PaginatedFetcher<T> $fetcher
-     * @param string|null         $startCursor resume point; null = from the beginning
      *
      * @return \Generator<int, Page<T>>
      *
-     * @throws PaginationLoopException
-     * @throws PageBudgetExceededException
+     * @throws PaginationLoopException     if a cursor is handed out twice
+     * @throws PageBudgetExceededException once maxPages pages are fetched and more remain
      */
     public function pages(PaginatedFetcher $fetcher, ?string $startCursor = null): \Generator
     {
         $walk = new Walk($startCursor, $this->maxPages);
 
         while ($walk->hasNext()) {
-            // The budget throws here, before the fetch — so its exception carries a
-            // cursor nobody has paid for. The page is then yielded BEFORE
-            // advance() runs loop detection on it: the offending page's items are
-            // valid data, and a checkpointing consumer must observe them.
+            // The budget throws in nextCursor(), before the fetch. The page is yielded
+            // before advance() runs loop detection, so a checkpointing consumer still
+            // sees the offending page's valid items.
             $page = $fetcher->fetchPage($walk->nextCursor());
 
             yield $page;
@@ -189,53 +100,13 @@ final class Paginator
     }
 
     /**
-     * Assemble exactly `$first` items starting at (`$pageCursor`, `$skip`),
-     * spanning as many upstream fetches as needed, and return them as a proper
-     * {@see Page}.
-     *
-     * This is the method a GraphQL resolver should use to honour Relay's `first`
-     * argument:
-     *
-     * ```php
-     * [$pageCursor, $skip] = $codec->decode($after ?? '');
-     * $page = $paginator->slice($fetcher, $first, $pageCursor, $skip);
-     * return $formatter->format($page, null, $codec->encode($pageCursor, $skip));
-     * ```
-     *
-     * Want a plain bounded array instead? `slice($fetcher, $limit)->items`.
-     *
-     * ### The returned page
-     *
-     * - **items** — exactly `$first` items, or fewer when the stream runs out.
-     * - **hasNextPage** — true when the last fetched upstream page still holds
-     *   items beyond the slice end, OR reports `hasNextPage=true` itself.
-     * - **endCursor** — the ACTUAL end position, ready to be sent straight back
-     *   in as `$pageCursor`/`$skip` after a {@see CursorCodec::decode()}:
-     *   - ended mid-upstream-page → `CursorCodec::encode($cursorThatFetchedThatPage, $consumed)`;
-     *   - ended exactly on a page boundary → that page's raw upstream
-     *     `endCursor`, which is the cheapest possible anchor;
-     *   - nothing left → `null`, mirroring `hasNextPage=false`.
-     *
-     *   Anchoring to the LAST upstream page touched (rather than to the slice's
-     *   own start) is what keeps repeated "load more" round trips O(1) instead
-     *   of O(n²): each response's `endCursor` starts the next walk from the
-     *   nearest upstream page, never from the origin.
-     *
-     * - **totalCount** — carried over from the last page fetched, when present.
-     *
-     * ### Fetch economy
-     *
-     * The walk stops the moment the answer is provable. If page *k* fills the
-     * slice and still has a spare item — or claims `hasNextPage=true` — page
-     * *k+1* is never requested. Returning from inside the `foreach` over
-     * `pages()` leaves that generator suspended, so no speculative fetch happens.
+     * Assemble exactly `$first` items from ($pageCursor, $skip), across
+     * as many upstream fetches as it takes. Its endCursor anchors to the
+     * last upstream page read, so repeated "load more" stays O(1).
      *
      * @template T
      *
      * @param PaginatedFetcher<T> $fetcher
-     * @param int                 $first      how many items to assemble; must be >= 0
-     * @param string|null         $pageCursor start position; null = from the beginning
-     * @param int                 $skip       items to drop from the start position; must be >= 0
      *
      * @return Page<T>
      *
@@ -256,8 +127,7 @@ final class Paginator
         $collected = [];
         $remainingSkip = $skip;
 
-        // The cursor the page currently under inspection was FETCHED with. Page
-        // itself only knows the cursor of the NEXT page, so we track this here.
+        // A Page only knows the cursor of the NEXT page, so track the one it was fetched with.
         $fetchedWith = $pageCursor;
         $totalCount = null;
 
@@ -281,14 +151,6 @@ final class Paginator
     }
 
     /**
-     * The slice is full inside `$page`, after `$consumed` of its items: decide
-     * what, if anything, comes after it.
-     *
-     * Items left unread in `$page` mean more data, addressed by the cursor that
-     * fetched the page plus the offset into it. A page read to its end defers to
-     * the upstream, whose own `endCursor` is the cheapest anchor there is; a
-     * trailing cursor on a final page is ignored, as everywhere else.
-     *
      * @template T
      *
      * @param Page<T> $page

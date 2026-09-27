@@ -39,7 +39,8 @@ the package, so it is written down here rather than discovered in production.
 Most upstreams give one cursor per page, but a Relay client sends back one edge's cursor as
 `after`. `OffsetEdgeCursorStrategy` bridges the gap with `(page cursor, offset within page)`,
 encoded by `CursorCodec` as base64-wrapped JSON with a version field. `slice()` and `items()`
-resume by re-fetching that page and skipping the offset.
+resume by re-fetching that page and skipping the offset. JSON rather than a delimited string,
+because an opaque upstream cursor may contain any delimiter; the `v` field versions the format.
 
 So an edge cursor is exact only while the upstream data holds still between two requests. If three
 rows are inserted before its page in the meantime, the next page repeats three; if three are

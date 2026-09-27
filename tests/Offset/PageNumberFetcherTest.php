@@ -20,11 +20,8 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Tests for the page-number fetcher base class.
- *
- * The claim under test is the one that made Proposal A cheap: a page number is a
- * legal opaque cursor, so the whole engine works over a page-numbered upstream
- * with no engine change at all. Every test here drives the real `Paginator`.
+ * A page number is a legal opaque cursor, so the engine works over a page-numbered
+ * upstream unchanged. Every test drives the real `Paginator` to prove it.
  */
 final class PageNumberFetcherTest extends TestCase
 {
@@ -53,8 +50,6 @@ final class PageNumberFetcherTest extends TestCase
     }
 
     /**
-     * The whole walk's cursor sequence, asserted in one go rather than page by page.
-     *
      * @param list<Page<string>> $pages
      *
      * @return list<?string>
@@ -74,9 +69,7 @@ final class PageNumberFetcherTest extends TestCase
         return array_map(static fn (Page $page): bool => $page->hasNextPage, $pages);
     }
 
-    // ------------------------------------------------------------------
-    // Simple — the happy path, on every terminal condition
-    // ------------------------------------------------------------------
+    // Simple
 
     #[Test]
     #[DataProvider('reportingProvider')]
@@ -112,9 +105,7 @@ final class PageNumberFetcherTest extends TestCase
         self::assertSame([true, true, false], self::hasNextFlagsOf($pages));
     }
 
-    // ------------------------------------------------------------------
     // Zero / One
-    // ------------------------------------------------------------------
 
     #[Test]
     #[DataProvider('reportingProvider')]
@@ -144,9 +135,7 @@ final class PageNumberFetcherTest extends TestCase
         self::assertSame(1, $fetcher->callCount());
     }
 
-    // ------------------------------------------------------------------
     // Many
-    // ------------------------------------------------------------------
 
     #[Test]
     #[DataProvider('reportingProvider')]
@@ -164,15 +153,13 @@ final class PageNumberFetcherTest extends TestCase
         );
     }
 
-    // ------------------------------------------------------------------
     // Boundaries — the classic off-by-one
-    // ------------------------------------------------------------------
 
     #[Test]
     public function aLastPageHoldingExactlyPageSizeRowsCostsNoExtraFetchWhenTotalsAreReported(): void
     {
-        // 6 rows at page size 3: the last page is full, so "short page means the
-        // end" cannot help. totalPages / totalItems settle it on the page itself.
+        // The last page is full, so "a short page is the last one" cannot help; the
+        // reported total settles it on the page itself.
         foreach ([TotalsReporting::TotalPages, TotalsReporting::TotalItems] as $reporting) {
             $fetcher = new PageNumberApiFetcher(self::rows(6), 3, $reporting);
 
@@ -186,8 +173,6 @@ final class PageNumberFetcherTest extends TestCase
     #[Test]
     public function aLastPageHoldingExactlyPageSizeRowsCostsOneEmptyProbeWithoutTotals(): void
     {
-        // The documented cost of the weakest terminal condition: one wasted round
-        // trip, never a missed row.
         $fetcher = new PageNumberApiFetcher(self::rows(6), 3, TotalsReporting::Neither);
 
         $items = iterator_to_array((new Paginator())->items($fetcher), false);
@@ -228,9 +213,7 @@ final class PageNumberFetcherTest extends TestCase
         self::assertSame([1, 2, 3], $fetcher->requested());
     }
 
-    // ------------------------------------------------------------------
     // Resuming — positions are absolute, not walk-relative
-    // ------------------------------------------------------------------
 
     #[Test]
     #[DataProvider('reportingProvider')]
@@ -239,7 +222,6 @@ final class PageNumberFetcherTest extends TestCase
         $all = self::rows(10);
         $fetcher = new PageNumberApiFetcher($all, 3, $reporting);
 
-        // '3' is the cursor page 2 handed out; the resumed walk must start there.
         $resumed = iterator_to_array((new Paginator())->items($fetcher, '3'), false);
 
         self::assertSame(\array_slice($all, 6), $resumed);
@@ -249,9 +231,8 @@ final class PageNumberFetcherTest extends TestCase
     #[Test]
     public function totalItemsAccountingStaysCorrectOnAResumedWalk(): void
     {
-        // The itemsThrough figure fed to OffsetPage is ABSOLUTE. If it were counted
-        // from the start of this walk instead, a resumed walk would think it had
-        // barely begun and would keep fetching past the end of the data.
+        // itemsThrough must be absolute: counted from this walk's start, a resumed walk
+        // would think it had barely begun and fetch past the end of the data.
         $fetcher = new PageNumberApiFetcher(self::rows(9), 3, TotalsReporting::TotalItems);
 
         $resumed = iterator_to_array((new Paginator())->items($fetcher, '3'), false);
@@ -261,10 +242,7 @@ final class PageNumberFetcherTest extends TestCase
     }
 
     /**
-     * A page-numbered upstream that post-filters server-side: FOUR pages of 2 rows
-     * each, out of the 3 rows per page that were requested.
-     *
-     * @param TotalsReporting $reporting which signal the envelope exposes
+     * Four pages of two rows each out of three requested, like a server-side post-filter.
      *
      * @return PageNumberFetcher<string>
      */
@@ -314,8 +292,7 @@ final class PageNumberFetcherTest extends TestCase
     #[Test]
     public function totalPagesIsTheOnlySignalThatWalksAnUpstreamWithShortMidStreamPages(): void
     {
-        // A page count is exact for a page-numbered fetcher however many rows each
-        // page holds, so it reads a filtered stream all the way to its end.
+        // A page count is exact for a page-numbered fetcher however many rows each page holds.
         $items = iterator_to_array(
             (new Paginator())->items(self::filteringUpstream(TotalsReporting::TotalPages)),
             false,
@@ -327,11 +304,8 @@ final class PageNumberFetcherTest extends TestCase
     #[Test]
     public function theOtherSignalsStopEarlyOnAnUpstreamWithShortMidStreamPages(): void
     {
-        // Pinned so the limitation is a known shape rather than a surprise. A row
-        // count has to be compared against a page number here, so short pages make
-        // it run ahead of the rows actually read; with no totals at all, a short page
-        // is indistinguishable from the last one. Both stop early, which is exactly
-        // why the class docblock asks for totalPages.
+        // A row count derived from the page number runs ahead of the rows read on short
+        // pages, and with no totals a short page looks like the last one.
         $withRowCount = iterator_to_array(
             (new Paginator())->items(self::filteringUpstream(TotalsReporting::TotalItems)),
             false,
@@ -349,9 +323,7 @@ final class PageNumberFetcherTest extends TestCase
         self::assertSame(self::filteredRows(1), $withNothing, 'the first short page reads as terminal');
     }
 
-    // ------------------------------------------------------------------
-    // Interfaces — the engine's own surface over a page-numbered upstream
-    // ------------------------------------------------------------------
+    // Interfaces
 
     #[Test]
     public function sliceHonoursAFirstArgumentThatDoesNotDivideThePageSize(): void
@@ -368,9 +340,6 @@ final class PageNumberFetcherTest extends TestCase
     #[Test]
     public function sliceRoundTripsThroughTheRelayFormatterOverAPageNumberedUpstream(): void
     {
-        // The Interfaces case: page-number cursors have to survive the same
-        // resolver round trip as a genuine opaque cursor — format a slice, send an
-        // edge cursor back as `after`, decode it, resume exactly after that edge.
         $rows = self::rows(20);
         $fetcher = new PageNumberApiFetcher($rows, 4, TotalsReporting::TotalItems);
         $paginator = new Paginator();
@@ -398,9 +367,8 @@ final class PageNumberFetcherTest extends TestCase
     #[Test]
     public function anEdgeCursorAnchoredToAPageNumberResumesAtTheRightRow(): void
     {
-        // Same round trip one page in, where the anchor is a real page number
-        // rather than null — the case that proves a bare integer survives being
-        // wrapped by CursorCodec and handed back by a Relay client.
+        // Unlike a slice from the origin, the anchor here is a real page number rather
+        // than null, so this proves a bare integer survives the CursorCodec wrapping.
         $rows = self::rows(20);
         $fetcher = new PageNumberApiFetcher($rows, 4, TotalsReporting::TotalItems);
         $paginator = new Paginator();
@@ -433,9 +401,7 @@ final class PageNumberFetcherTest extends TestCase
         );
     }
 
-    // ------------------------------------------------------------------
     // Exceptions
-    // ------------------------------------------------------------------
 
     #[Test]
     public function aCursorThatIsNotAPlainIntegerIsRejected(): void
@@ -450,8 +416,7 @@ final class PageNumberFetcherTest extends TestCase
     #[Test]
     public function anEncodedSyntheticCursorIsRejectedWithAPointerToTheCodec(): void
     {
-        // The realistic mistake: handing the resolver's raw `after` string straight
-        // to the fetcher instead of decoding it first.
+        // The realistic mistake: passing the resolver's raw `after` to the fetcher undecoded.
         $fetcher = new PageNumberApiFetcher(self::rows(5), 3);
         $encoded = (new CursorCodec())->encode('2', 1);
 
@@ -508,10 +473,9 @@ final class PageNumberFetcherTest extends TestCase
     #[DataProvider('malformedCursorProvider')]
     public function aCursorThatWouldOverflowThePositionArithmeticIsRejected(string $cursor): void
     {
-        // Page numbers are multiplied by the page size to reach a row count, so they
-        // overflow to float an order of magnitude sooner than a raw offset does.
-        // Unguarded that float hits OffsetPage's int parameters as a TypeError, and
-        // the upstream has already been called with the absurd page number by then.
+        // Page numbers are multiplied by the page size, so they overflow sooner than an
+        // offset. Unguarded, the float reaches OffsetPage as a TypeError, after the upstream
+        // has already been called with the absurd page number.
         $fetcher = new PageNumberApiFetcher(self::rows(5), 3);
 
         $this->expectException(MalformedPageException::class);
@@ -532,9 +496,6 @@ final class PageNumberFetcherTest extends TestCase
     #[Test]
     public function aRunawayEnvelopeIsStoppedByThePageBudgetBecauseLoopDetectionCannotFire(): void
     {
-        // The honesty clause, executed: page numbers never repeat, so
-        // PaginationLoopException is unreachable for this fetcher and the budget is
-        // the only thing left. This test is the reason the class docblock says so.
         /** @extends PageNumberFetcher<string> */
         $endless = new class (3) extends PageNumberFetcher {
             public int $callCount = 0;
