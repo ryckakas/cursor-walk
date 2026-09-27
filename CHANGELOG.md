@@ -7,16 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned
+Planned work lives in [ROADMAP.md](ROADMAP.md).
 
-- ID-anchored edge cursors via an optional `ItemIdExtractor`: encode
-  `(pageCursor, lastSeenItemId)` and resume by skipping until just after that ID, making
-  cursors resilient to upstream inserts and deletes. Degrades to the current offset mode when
-  no extractor is configured; the `CursorCodec` envelope's `v` field already reserves the
-  migration path.
-- Async / concurrent page fetching with bounded concurrency, as a second driver over
-  `CursorWalk\Walk`.
-- Backward pagination (`before` / `last`), for upstreams that actually support reverse traversal.
+### Changed
+
+- The README is now a landing page. The recipes moved to [docs/recipes.md](docs/recipes.md), the
+  trade-offs and comparisons to [docs/design.md](docs/design.md), and the roadmap to
+  [ROADMAP.md](ROADMAP.md). No library behaviour changed.
 
 ## [0.2.0] - 2026-08-05
 
@@ -129,8 +126,8 @@ Initial release. Forward-only cursor pagination for PHP 8.2+, with zero runtime 
 - Forward-only in this release: `pageInfo.hasPreviousPage` is always `false`. (Corrected in
   0.2.0 — it was never a structural constraint.)
 - Synthetic edge cursors are positional (page cursor plus offset) and therefore valid only
-  while the upstream data does not shift between requests. See the "Cursor stability" section
-  of the README for the full tradeoff.
+  while the upstream data does not shift between requests. See
+  [cursor stability](docs/design.md#cursor-stability) for the full tradeoff.
 
 [Unreleased]: https://github.com/ryckakas/cursor-walk/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/ryckakas/cursor-walk/compare/v0.1.0...v0.2.0
