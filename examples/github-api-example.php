@@ -252,22 +252,9 @@ final class TagsFetcher implements PaginatedFetcher
 // Demo
 // ---------------------------------------------------------------------------
 
-$owner = $argv[1] ?? (getenv('CURSOR_WALK_EXAMPLE_OWNER') ?: 'symfony');
-$repo = $argv[2] ?? (getenv('CURSOR_WALK_EXAMPLE_REPO') ?: 'symfony');
-
-$envToken = getenv('GITHUB_TOKEN');
-$token = ($envToken !== false && $envToken !== '') ? $envToken : null;
-
-printf("cursor-walk live example — GitHub tags for %s/%s\n", $owner, $repo);
-printf(
-    "Auth: %s. (Never printing the token itself.)\n\n",
-    $token !== null ? 'authenticated (5,000 req/h)' : 'unauthenticated (60 req/h)',
-);
-
-$initialUrl = sprintf('https://api.github.com/repos/%s/%s/tags?per_page=5', rawurlencode($owner), rawurlencode($repo));
-
-try {
-    // == a. items() bounded by a small maxPages, streaming as it goes ========
+// == a. items() bounded by a small maxPages, streaming as it goes ============
+function demoStreaming(string $initialUrl, ?string $token): void
+{
     printf("== a. Paginator(maxPages: 2)->items(): streaming tags ==\n");
 
     $boundedPaginator = new Paginator(maxPages: 2);
@@ -285,8 +272,11 @@ try {
             $e->getMaxPages(),
         );
     }
+}
 
-    // == b. slice() + Relay\ConnectionFormatter: the GraphQL resolver flow ===
+// == b. slice() + Relay\ConnectionFormatter: the GraphQL resolver flow =======
+function demoSlice(string $initialUrl, ?string $token): void
+{
     printf("\n== b. slice(7) + Relay\\ConnectionFormatter ==\n");
 
     $fetcherB = new TagsFetcher($initialUrl, $token);
@@ -299,8 +289,11 @@ try {
     );
 
     echo json_encode($connection, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), "\n";
+}
 
-    // == c. pages(): per-page checkpointing with the Link URL as checkpoint ==
+// == c. pages(): per-page checkpointing with the Link URL as checkpoint ======
+function demoCheckpoint(string $initialUrl, ?string $token): void
+{
     printf("\n== c. pages(): checkpointing on the upstream's own next-page URL ==\n");
 
     $fetcherC = new TagsFetcher($initialUrl, $token);
@@ -316,25 +309,50 @@ try {
 
         break; // One page is enough to show the shape; see (a) for streaming all of it.
     }
+}
+
+/**
+ * Reports why the demo stopped and exits 0: a live-network example must never fail a caller over an
+ * outage or a rate limit.
+ */
+function exitCleanly(string $report): never
+{
+    printf("\n%s\n", $report);
+    printf("This is a best-effort, network-dependent example — exiting cleanly.\n");
+    exit(0);
+}
+
+$owner = $argv[1] ?? (getenv('CURSOR_WALK_EXAMPLE_OWNER') ?: 'symfony');
+$repo = $argv[2] ?? (getenv('CURSOR_WALK_EXAMPLE_REPO') ?: 'symfony');
+
+$envToken = getenv('GITHUB_TOKEN');
+$token = ($envToken !== false && $envToken !== '') ? $envToken : null;
+
+printf("cursor-walk live example — GitHub tags for %s/%s\n", $owner, $repo);
+printf(
+    "Auth: %s. (Never printing the token itself.)\n\n",
+    $token !== null ? 'authenticated (5,000 req/h)' : 'unauthenticated (60 req/h)',
+);
+
+$initialUrl = sprintf('https://api.github.com/repos/%s/%s/tags?per_page=5', rawurlencode($owner), rawurlencode($repo));
+
+try {
+    demoStreaming($initialUrl, $token);
+    demoSlice($initialUrl, $token);
+    demoCheckpoint($initialUrl, $token);
 
     printf("\nDone. Total HTTP requests made: a handful, always bounded — see the comments above.\n");
 } catch (GitHubApiUnavailable $e) {
-    printf("\nThe GitHub API isn't available for this demo right now:\n  %s\n", $e->getMessage());
-    printf("This is a best-effort, network-dependent example — exiting cleanly.\n");
-    exit(0);
+    exitCleanly("The GitHub API isn't available for this demo right now:\n  " . $e->getMessage());
+} catch (MalformedPageException $e) {
+    exitCleanly(
+        "cursor-walk could not process the GitHub response:\n  " . $e->getMessage()
+        . "\n  cursor at failure: " . ($e->getCursor() ?? '(first page)'),
+    );
 } catch (CursorWalkException $e) {
-    printf("\ncursor-walk could not process the GitHub response:\n  %s\n", $e->getMessage());
-
-    if ($e instanceof MalformedPageException) {
-        printf("  cursor at failure: %s\n", $e->getCursor() ?? '(first page)');
-    }
-
-    printf("This is a best-effort, network-dependent example — exiting cleanly.\n");
-    exit(0);
+    exitCleanly("cursor-walk could not process the GitHub response:\n  " . $e->getMessage());
 } catch (\Throwable $e) {
-    printf("\nUnexpected error talking to the GitHub API: %s\n", $e->getMessage());
-    printf("This is a best-effort, network-dependent example — exiting cleanly.\n");
-    exit(0);
+    exitCleanly('Unexpected error talking to the GitHub API: ' . $e->getMessage());
 }
 
 exit(0);

@@ -15,7 +15,7 @@ composer cs             # php-cs-fixer --dry-run --diff (exit 8 = needs fixing)
 composer cs:fix         # apply the fixes
 composer coverage       # phpunit + Clover + tools/check-coverage.php (floor: 100%)
 composer mutation       # infection (floors: minMsi 85 / minCoveredMsi 85)
-composer complexity     # bonsai-lint cognitive complexity gate (bonsai-lint.toml + baseline)
+composer complexity     # bonsai-lint cognitive complexity gate (threshold 15, no baseline)
 
 zizmor .github          # workflow security, CI's "Workflow security" job; not a composer script
 ```
@@ -156,10 +156,11 @@ annotations; a docblock on a closure assignment will not infer a generator's `TS
 - **Two tool pins move by hand.** Dependabot (7-day cooldown) bumps Composer packages and action
   SHAs, but not the bonsai-lint version in the `complexity` script or the zizmor version in
   `ci.yml`. A bonsai-lint bump can move scores, so re-run the gate on the whole tree with it.
-- **The complexity baseline only shrinks.** `.bonsai-lint-baseline.json` records the functions
-  that were already over the threshold of 15 when the gate was adopted. A new or grown finding
-  is a refactor, not a baseline entry. After a refactor lowers a recorded score, regenerate the
-  file with `npx --yes bonsai-lint@<pinned> --write-baseline .` so it cannot creep back up.
+- **There is no complexity baseline, and there should not be one.** Every function, method and
+  script body is at or under the threshold of 15, so a finding is fixed by refactoring, never by
+  running `--write-baseline`. Examples and `tools/` count too: split a long script into named
+  functions rather than letting its file-level code grow. `npx --yes bonsai-lint@<pinned> --all .`
+  ranks every unit when you want to see what is close.
 - Dev dependencies are pinned to **exact** versions (no carets), which is what makes
   `composer audit` actionable. `require: php >=8.2` stays a range — it is a compatibility contract.
 - Releases are tag-driven; Packagist syncs by webhook. `composer.json` carries no `version` field.
