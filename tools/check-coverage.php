@@ -3,12 +3,8 @@
 declare(strict_types=1);
 
 /*
- * Fails the build when line coverage drops below MINIMUM_PERCENT.
- *
- * PHPUnit can report coverage but cannot enforce a floor, so the number in CI
- * was previously printed and then ignored — free to rot. This reads the Clover
- * report PHPUnit just wrote and exits non-zero if the ratio fell.
- *
+ * Fails the build when line coverage in a Clover report drops below MINIMUM_PERCENT.
+ * PHPUnit reports coverage but cannot enforce a floor, so this gate does.
  * Usage: php tools/check-coverage.php <path-to-clover.xml> [minimum-percent]
  */
 

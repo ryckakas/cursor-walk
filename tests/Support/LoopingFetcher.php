@@ -8,11 +8,8 @@ use CursorWalk\Page;
 use CursorWalk\PaginatedFetcher;
 
 /**
- * A broken upstream that keeps handing back the *same* cursor forever.
- *
- * This is a bug in the upstream or in the fetcher — following it would loop
- * until the heat death of the universe — so the engine must detect the
- * repeat and throw {@see \CursorWalk\Exception\PaginationLoopException}.
+ * A broken upstream that returns the same cursor forever, the fixture for
+ * {@see \CursorWalk\Exception\PaginationLoopException}.
  *
  * @implements PaginatedFetcher<string>
  */

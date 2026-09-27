@@ -9,12 +9,8 @@ use CursorWalk\PaginatedFetcher;
 use LogicException;
 
 /**
- * Returns a pre-scripted sequence of {@see Page} objects, one per call,
- * regardless of the cursor it is handed.
- *
- * Use this to model upstream shapes that are awkward to express with
- * {@see ArrayFetcher}: empty mid-stream pages, cursor sequences that repeat,
- * trailing end cursors on final pages, and so on.
+ * Returns pre-scripted {@see Page} objects, one per call, ignoring the cursor. For upstream shapes
+ * {@see ArrayFetcher} cannot express: empty mid-stream pages, repeating cursors, trailing end cursors.
  *
  * @template T
  *
@@ -28,7 +24,7 @@ final class ScriptedFetcher implements PaginatedFetcher
     private array $cursors = [];
 
     /**
-     * @param list<Page<T>> $pages pages to return, in call order
+     * @param list<Page<T>> $pages
      */
     public function __construct(private readonly array $pages)
     {

@@ -7,66 +7,18 @@ namespace CursorWalk;
 use CursorWalk\Exception\MalformedPageException;
 
 /**
- * One page of results from a paginated upstream.
- *
- * Immutable value object. `$endCursor` is the opaque token used to fetch the
- * NEXT page — it is not a token describing this page's own position. (That
- * asymmetry is why {@see Relay\ConnectionFormatter::format()} accepts the
- * cursor a page was FETCHED with as a separate argument.)
- *
- * ## Legal states
- *
- * Every combination of `$items`, `$endCursor` and `$hasNextPage` is legal
- * EXCEPT `hasNextPage=true` together with a null or empty `$endCursor`: a page
- * that claims more data while providing no way to reach it is unusable, and the
- * constructor rejects it with {@see MalformedPageException::missingCursor()}.
- *
- * | items     | endCursor | hasNextPage | verdict                                          |
- * |-----------|-----------|-------------|--------------------------------------------------|
- * | non-empty | non-empty | true        | ordinary mid-stream page                          |
- * | non-empty | non-empty | false       | final page with a trailing cursor — legal, ignored|
- * | non-empty | null      | false       | ordinary final page                               |
- * | empty     | non-empty | true        | empty mid-stream page — legal, see below          |
- * | empty     | non-empty | false       | terminal page that happens to carry a cursor      |
- * | empty     | null      | false       | terminal empty page, see {@see self::empty()}     |
- * | any       | null / '' | true        | ILLEGAL — throws MalformedPageException           |
- *
- * ### Trailing cursors
- * An upstream that always emits a cursor, even on the last page, is fine. When
- * `hasNextPage=false` the engine stops and ignores `$endCursor`.
- *
- * ### Empty mid-stream pages
- * `items: []` with `hasNextPage: true` is VALID and does occur in the wild —
- * DynamoDB filtered `Query`/`Scan`, and any upstream that post-filters a page
- * server-side, can return a page with no rows plus a continuation token.
- * {@see Paginator::pages()} yields such pages as-is, so per-page checkpointing
- * still observes them; {@see Paginator::items()} transparently continues to the
- * next page, so item iteration never sees the gap.
- *
- * ### Escape hatch for stricter upstreams
- * If YOUR upstream never legitimately returns an empty mid-stream page, that is
- * fetcher policy, not engine policy — there is deliberately no Paginator flag
- * for it. Enforce it where the knowledge lives:
- *
- * ```php
- * if ($rows === [] && $body['has_more']) {
- *     throw MalformedPageException::invalidEnvelope('empty mid-stream page', $cursor, $body);
- * }
- * ```
+ * One page from a paginated upstream; `$endCursor` fetches the NEXT page, not
+ * this one. Every state is legal except hasNextPage=true with a null or empty
+ * endCursor. Stricter upstream policy belongs in the fetcher, not here.
  *
  * @template-covariant T
  */
 final class Page implements \Countable
 {
     /**
-     * @param list<T>     $items       the page's items, in upstream order
-     * @param string|null $endCursor   opaque token for fetching the next page
-     * @param bool        $hasNextPage whether the upstream reports more data
-     * @param int|null    $totalCount  total across the whole stream, when the
-     *                                 upstream exposes it
+     * @param list<T> $items
      *
-     * @throws MalformedPageException if `$hasNextPage` is true without a usable
-     *                                cursor, or if `$items` is not a list
+     * @throws MalformedPageException if `$hasNextPage` is true without a usable cursor, or `$items` is not a list
      */
     public function __construct(
         public readonly array $items,
@@ -91,9 +43,6 @@ final class Page implements \Countable
     /**
      * The terminal empty page: no items, no cursor, no more data.
      *
-     * Handy as a fetcher's response when the upstream signals "nothing here"
-     * without returning a usable envelope.
-     *
      * @return self<never>
      */
     public static function empty(): self
@@ -102,8 +51,7 @@ final class Page implements \Countable
     }
 
     /**
-     * Whether this page carries no items. An empty page may still have
-     * `hasNextPage=true` — see the class docblock.
+     * Whether this page has no items. An empty page may still have hasNextPage=true.
      */
     public function isEmpty(): bool
     {
@@ -111,8 +59,7 @@ final class Page implements \Countable
     }
 
     /**
-     * Number of items on this page — not the total across the stream, which is
-     * `$totalCount`.
+     * Items on this page, not the stream total, which is `$totalCount`.
      */
     public function count(): int
     {

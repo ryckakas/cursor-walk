@@ -13,12 +13,8 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Tests for the caller-driven stepper.
- *
- * `Paginator` is implemented in terms of `Walk`, so {@see PaginatorTest} already
- * covers the policy end to end through the library's own driver. This file covers
- * what only a hand-written driver can reach: the alternation protocol, the
- * accounting, and the states a generator frame used to make unreachable.
+ * {@see PaginatorTest} covers the policy through the library's own driver. This file covers
+ * what only a hand-written driver can reach: the alternation protocol and the accounting.
  */
 final class WalkTest extends TestCase
 {
@@ -41,12 +37,6 @@ final class WalkTest extends TestCase
     }
 
     /**
-     * Drive a whole walk over a list of scripted pages, collecting the cursors the
-     * walk asked to be fetched.
-     *
-     * This is the shape every real driver has — `Paginator::pages()`, a Fiber, a
-     * workflow — with the fetch replaced by an array lookup.
-     *
      * @param list<Page<string>> $pages
      *
      * @return list<?string>
@@ -66,9 +56,7 @@ final class WalkTest extends TestCase
         return $requested;
     }
 
-    // ------------------------------------------------------------------
     // Simple — the ordinary walk
-    // ------------------------------------------------------------------
 
     #[Test]
     public function aWalkThreadsEachPagesCursorIntoTheNextFetch(): void
@@ -96,9 +84,7 @@ final class WalkTest extends TestCase
         self::assertSame(['resume-here', 'cursor-2'], $requested);
     }
 
-    // ------------------------------------------------------------------
     // Zero / One
-    // ------------------------------------------------------------------
 
     #[Test]
     public function aFreshWalkAlwaysOffersOneFetchSoAnEmptyUpstreamCanBeObserved(): void
@@ -118,8 +104,7 @@ final class WalkTest extends TestCase
     #[Test]
     public function anEmptyMidStreamPageContinuesTheWalk(): void
     {
-        // Same contract as Paginator: an empty page carrying a cursor is legal and
-        // does occur (a server-side filtered window), so it must not terminate.
+        // An empty page with a cursor does occur (a server-side filtered window), so it must not end the walk.
         $walk = new Walk();
         $walk->nextCursor();
         $walk->advance(new Page([], 'cursor-1', true));
@@ -128,9 +113,7 @@ final class WalkTest extends TestCase
         self::assertSame('cursor-1', $walk->nextCursor());
     }
 
-    // ------------------------------------------------------------------
     // Many
-    // ------------------------------------------------------------------
 
     #[Test]
     public function aLongWalkKeepsAccountingCorrectlyAcrossHundredsOfPages(): void
@@ -148,9 +131,7 @@ final class WalkTest extends TestCase
         self::assertSame('cursor-499', $walk->nextCursor(), 'the walk is still threading the latest cursor');
     }
 
-    // ------------------------------------------------------------------
     // Boundaries — the page budget
-    // ------------------------------------------------------------------
 
     #[Test]
     public function theBudgetIsSpentOnDrawingCursorsAndThrowsOnTheDrawAfterTheLastOne(): void
@@ -243,9 +224,7 @@ final class WalkTest extends TestCase
         self::assertSame(10_050, $walk->pagesFetched(), 'well past the 10,000 default');
     }
 
-    // ------------------------------------------------------------------
     // Loop detection
-    // ------------------------------------------------------------------
 
     #[Test]
     public function aRepeatedCursorIsRejectedAfterThePageCarryingItWasHandedBack(): void
@@ -280,8 +259,7 @@ final class WalkTest extends TestCase
     #[Test]
     public function aWalkThatDetectedALoopIsFinishedSoASwallowedExceptionCannotKeepWalking(): void
     {
-        // A loop is neither retryable nor resumable. A driver with a `catch` around
-        // its loop body must not be able to carry on re-fetching the same page.
+        // A loop is neither retryable nor resumable.
         $walk = new Walk(self::STUCK);
         $walk->nextCursor();
 
@@ -301,16 +279,8 @@ final class WalkTest extends TestCase
     #[Test]
     public function aTerminalPageWhoseTrailingCursorRepeatsIsNotALoop(): void
     {
-        // Page documents "final page with a trailing cursor — legal, ignored": an
-        // upstream that always emits a cursor, even on its last page, is fine. So a
-        // terminal page whose cursor happens to be one already seen must simply end
-        // the walk. Nothing will be fetched with it, so there is no loop to report,
-        // and raising PaginationLoopException here would page an on-call engineer
-        // about a healthy upstream.
-        //
-        // FOUND BY MUTATION TESTING: removing the early return after
-        // hasNextPage=false left the entire suite passing, because no test drove
-        // this combination.
+        // A final page may carry a trailing cursor, even one already seen. Nothing is fetched with it,
+        // so reporting a loop here would page on-call about a healthy upstream.
         $walk = new Walk('cursor-1');
         $walk->nextCursor();
 
@@ -333,18 +303,13 @@ final class WalkTest extends TestCase
         self::assertSame('cursor-1', $second->nextCursor(), 'two walks must not interfere');
     }
 
-    // ------------------------------------------------------------------
     // The defensive empty-cursor stop
-    // ------------------------------------------------------------------
 
     #[Test]
     public function aPageClaimingMoreDataWithNoUsableCursorStopsTheWalkInsteadOfSpinning(): void
     {
-        // Page's constructor makes this state impossible, so the page here is built
-        // WITHOUT it — the way a payload converter, an unserialize(), or an ORM-style
-        // hydrator would. advance() is public, so that page can reach a walk, and
-        // without this stop the walk would re-fetch the same cursor forever.
-        // Terminating is the safe degradation.
+        // Page's constructor forbids this state, but a hydrator or unserialize() can build it and
+        // advance() is public. Without this stop the walk would re-fetch the same cursor forever.
         $illegal = self::pageBypassingValidation('', true);
 
         $walk = new Walk('some-cursor');
@@ -365,10 +330,7 @@ final class WalkTest extends TestCase
     }
 
     /**
-     * Build a {@see Page} in a state its constructor rejects.
-     *
-     * Reflection rather than a hand-written `unserialize()` payload: it fails loudly
-     * if a property is ever renamed, instead of quietly producing a different object.
+     * Reflection, not an `unserialize()` payload, so a renamed property fails loudly.
      *
      * @return Page<string>
      */
@@ -391,9 +353,7 @@ final class WalkTest extends TestCase
         return $page;
     }
 
-    // ------------------------------------------------------------------
     // The alternation protocol — driver bugs are LogicExceptions
-    // ------------------------------------------------------------------
 
     #[Test]
     public function drawingTwiceWithoutHandingBackAPageIsADriverBug(): void
@@ -421,10 +381,8 @@ final class WalkTest extends TestCase
     #[Test]
     public function advancingTwiceForOneDrawnCursorIsADriverBugRatherThanAFalseLoopReport(): void
     {
-        // This is the reason the protocol is enforced at all. A tolerant stepper
-        // would feed the same page into loop detection twice and raise
-        // PaginationLoopException — the exception that means "page the on-call
-        // engineer, the upstream is broken" — for a bug in the driver.
+        // This is why the protocol is enforced: a tolerant stepper would run loop detection twice
+        // and report a driver bug as a broken upstream.
         $walk = new Walk();
         $walk->nextCursor();
         $walk->advance(self::pageWith('cursor-1'));
@@ -493,10 +451,7 @@ final class WalkTest extends TestCase
     public function everyProtocolViolationRaisesABareLogicExceptionAndNoNewExceptionType(
         \Closure $violate,
     ): void {
-        // Deliberately \LogicException and not a CursorWalkException subclass: the
-        // library's exception taxonomy is about upstream bugs and policy limits, and
-        // a driver misusing the stepper is neither. It also keeps the change at zero
-        // new public types.
+        // CursorWalkException is for upstream bugs and policy limits; a misused stepper is neither.
         $walk = new Walk();
 
         try {
@@ -504,25 +459,19 @@ final class WalkTest extends TestCase
 
             self::fail('the violation must have been rejected.');
         } catch (\LogicException $exception) {
-            // Catching \LogicException IS the assertion about the taxonomy: a
-            // CursorWalkException would not be caught here, because it extends
-            // \RuntimeException.
+            // The catch is the taxonomy assertion: CursorWalkException extends \RuntimeException,
+            // so it would not land here.
             self::assertNotSame('', $exception->getMessage(), 'a driver bug must say what the driver did wrong');
         }
     }
 
-    // ------------------------------------------------------------------
     // Interfaces — the shape a workflow engine drives it in
-    // ------------------------------------------------------------------
 
     #[Test]
     public function aWalkDrivenThroughGeneratorYieldsCompletesTheSameAsPaginator(): void
     {
-        // The Temporal shape without the Temporal SDK: every fetch leaves the walk's
-        // frame as a yielded request and comes back as a plain result, exactly as an
-        // activity call does. Nothing in Walk cares.
-        // Keyed by cursor, with '' standing in for the null first-page cursor —
-        // spelled out rather than relying on PHP coercing a null key to ''.
+        // The Temporal shape without the SDK: each fetch leaves as a yield and returns as a plain result.
+        // '' stands in for the null first cursor rather than relying on PHP coercing a null key.
         $upstream = [
             '' => ['rows' => ['a', 'b'], 'next' => 'c1'],
             'c1' => ['rows' => ['c'], 'next' => 'c2'],
@@ -546,13 +495,8 @@ final class WalkTest extends TestCase
     }
 
     /**
-     * A workflow-shaped driver: it hands each cursor OUT as a yield and receives the
-     * fetched page back in, which is what a Temporal activity call looks like from
-     * inside workflow code — and the one thing a `PaginatedFetcher` cannot express.
-     *
-     * The `Page` is reconstructed here rather than marshalled across the boundary,
-     * exactly as the recipe prescribes, so its constructor validation runs on the
-     * side where the walk needs it to hold.
+     * The `Page` is rebuilt here rather than marshalled across the boundary, so its constructor
+     * validation runs on the side where the walk needs it to hold.
      *
      * @return \Generator<int, ?string, array{rows: list<string>, next: ?string}, list<string>>
      */
@@ -577,9 +521,6 @@ final class WalkTest extends TestCase
     #[Test]
     public function aWalkSurvivesBeingReconstructedFromACheckpointBetweenRuns(): void
     {
-        // What a resumable workflow or a batch job actually does: stop after a page,
-        // persist the cursor, start a fresh Walk from it later. The two halves must
-        // join up with no gap and no duplicate.
         $pages = [
             'p1' => self::pageWith('p2'),
             'p2' => self::pageWith('p3'),

@@ -1,15 +1,7 @@
 version: 2
 
-# Dev dependencies are pinned to exact versions (no carets), which trades
-# "silently drifts" for "never moves". Dependabot is the other half of that
-# trade: it proposes each bump as its own PR, CI runs the full gate against it,
-# and the pin is updated deliberately instead of at install time.
-#
-# Cooldown holds a release for seven days before proposing it: a malicious or
-# broken publish is usually caught and yanked within the week, before it lands
-# here. With no semver-specific overrides it applies to major, minor and patch.
-#
-# There are no runtime dependencies to watch — `require` is `php` alone.
+# Exact pins never drift, so Dependabot is how they move: one reviewed PR per bump.
+# The 7-day cooldown lets a malicious or broken release be yanked before it lands here.
 updates:
   - package-ecosystem: composer
     directory: /
@@ -23,8 +15,7 @@ updates:
     labels:
       - dependencies
     groups:
-      # One PR for the toolchain rather than four: they are all dev-only, and
-      # reviewing them together is how they get exercised together.
+      # One PR for the dev toolchain, because its tools are exercised together.
       dev-tooling:
         patterns:
           - '*'
@@ -32,9 +23,7 @@ updates:
           - minor
           - patch
 
-  # The backward-compatibility checker's separate install, pinned exactly with a
-  # committed lock. One grouped PR, because nothing here ships and the "Public
-  # API" job re-running is the whole review.
+  # The API checker's own install. Nothing in it ships, so one grouped PR is enough.
   - package-ecosystem: composer
     directory: /tools/bc-check
     schedule:
@@ -50,9 +39,7 @@ updates:
         patterns:
           - '*'
 
-  # The workflows pin each action to a commit with the release in a comment;
-  # Dependabot moves both. zizmor and bonsai-lint are pinned inside a workflow
-  # input and a composer script, where it cannot see them, so they move by hand.
+  # zizmor and bonsai-lint are pinned where Dependabot cannot see them, so they move by hand.
   - package-ecosystem: github-actions
     directory: /
     schedule:

@@ -18,14 +18,6 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
-/**
- * Tests for the row-offset fetcher base class.
- *
- * Where {@see PageNumberFetcherTest} proves a page number works as a cursor, this
- * file pins the arithmetic that makes offsets the *preferable* wire format: the
- * next cursor tracks rows actually returned, so it stays correct when the upstream
- * hands back a short page or the page size changes between requests.
- */
 final class OffsetFetcherTest extends TestCase
 {
     /**
@@ -52,9 +44,7 @@ final class OffsetFetcherTest extends TestCase
         yield 'envelope reports neither' => [TotalsReporting::Neither];
     }
 
-    // ------------------------------------------------------------------
     // Simple
-    // ------------------------------------------------------------------
 
     #[Test]
     #[DataProvider('reportingProvider')]
@@ -88,16 +78,13 @@ final class OffsetFetcherTest extends TestCase
         );
     }
 
-    // ------------------------------------------------------------------
     // The offset-specific arithmetic
-    // ------------------------------------------------------------------
 
     #[Test]
     public function theNextCursorCountsRowsActuallyReturnedRatherThanRowsRequested(): void
     {
-        // An upstream that post-filters a window returns fewer rows than asked for
-        // while more data remains. Advancing by $pageSize would skip the difference;
-        // advancing by the rows returned resumes exactly where the data stopped.
+        // A post-filtering upstream returns fewer rows than asked while more remain;
+        // advancing by $pageSize would skip the difference.
         /** @extends OffsetFetcher<string> */
         $shortPages = new class (5) extends OffsetFetcher {
             /** @var list<int> */
@@ -107,7 +94,6 @@ final class OffsetFetcherTest extends TestCase
             {
                 $this->requested[] = $position;
 
-                // Two rows per call out of a five-row window, 6 rows in total.
                 return new OffsetPage(
                     $position < 6 ? ['row-' . $position, 'row-' . ($position + 1)] : [],
                     totalItems: 6,
@@ -127,10 +113,8 @@ final class OffsetFetcherTest extends TestCase
     #[Test]
     public function anEmptyWindowThatStillClaimsMoreRowsIsCaughtByLoopDetection(): void
     {
-        // The one job repeated-cursor detection retains for this fetcher: a
-        // stationary offset. Unlike a page number, an offset that does not advance
-        // repeats its cursor, so the guard fires on the next fetch instead of
-        // letting the walk spin until the budget runs out.
+        // Unlike a page number, a stationary offset repeats its cursor, so loop
+        // detection fires on the next fetch instead of the walk spinning to the budget.
         /** @extends OffsetFetcher<string> */
         $stuck = new class (3) extends OffsetFetcher {
             public int $callCount = 0;
@@ -157,9 +141,8 @@ final class OffsetFetcherTest extends TestCase
     #[Test]
     public function totalPagesIsComparedAgainstThePageOrdinalDerivedFromTheOffset(): void
     {
-        // totalPages is a page count, but this fetcher walks in rows — so the
-        // comparison needs the 1-based ordinal of the current window. Resuming
-        // mid-stream is where a walk-relative counter would get it wrong.
+        // totalPages needs the window's 1-based ordinal; resuming mid-stream is where
+        // a walk-relative counter would get it wrong.
         $fetcher = new OffsetApiFetcher(self::rows(9), 3, TotalsReporting::TotalPages);
 
         $resumed = iterator_to_array((new Paginator())->items($fetcher, '6'), false);
@@ -169,11 +152,7 @@ final class OffsetFetcherTest extends TestCase
     }
 
     /**
-     * The offset-unit mirror of {@see PageNumberFetcherTest}'s filtering upstream:
-     * NINE rows handed back 2 at a time, out of the 3 per call that were requested,
-     * because the upstream post-filters server-side.
-     *
-     * @param TotalsReporting $reporting which signal the envelope exposes
+     * Nine rows returned two per call out of three requested, like a server-side post-filter.
      *
      * @return OffsetFetcher<string>
      */
@@ -212,8 +191,7 @@ final class OffsetFetcherTest extends TestCase
     #[Test]
     public function totalItemsIsTheOnlySignalThatWalksAnOffsetUpstreamWithShortWindows(): void
     {
-        // The mirror of PageNumberFetcherTest's totalPages case: a row count is exact
-        // for a row-offset fetcher however few rows a window returns.
+        // A row count is exact for a row-offset fetcher however few rows a window returns.
         $items = iterator_to_array(
             (new Paginator())->items(self::filteringUpstream(TotalsReporting::TotalItems)),
             false,
@@ -225,13 +203,9 @@ final class OffsetFetcherTest extends TestCase
     #[Test]
     public function theOtherSignalsStopEarlyOnAnOffsetUpstreamWithShortWindows(): void
     {
-        // The cost of the mismatched signal, in this fetcher's direction. A page
-        // count has to be compared against an ordinal derived by dividing the row
-        // offset by the page size, and short windows make that ordinal LAG the rows
-        // actually read — so it reaches totalPages while rows remain. Note it is
-        // approximate rather than always-wrong: at eight rows the lag happens to
-        // land on the last window and nothing is lost. Nine is where it costs a row,
-        // which is why the docblock asks for totalItems instead of trusting luck.
+        // Short windows make the offset-derived page ordinal lag the rows read, so it
+        // reaches totalPages while rows remain. Nine rows, not eight: at eight the lag
+        // happens to land on the last window and nothing is lost.
         $withPageCount = iterator_to_array(
             (new Paginator())->items(self::filteringUpstream(TotalsReporting::TotalPages)),
             false,
@@ -245,9 +219,7 @@ final class OffsetFetcherTest extends TestCase
         self::assertSame(self::rows(2), $withNothing, 'the first short window reads as terminal');
     }
 
-    // ------------------------------------------------------------------
     // Zero / One / Many / Boundaries
-    // ------------------------------------------------------------------
 
     #[Test]
     #[DataProvider('reportingProvider')]
@@ -301,9 +273,7 @@ final class OffsetFetcherTest extends TestCase
         self::assertSame([0, 3, 6], $fetcher->requested(), 'offset 6 is the empty probe that ends the walk');
     }
 
-    // ------------------------------------------------------------------
     // Resuming and Interfaces
-    // ------------------------------------------------------------------
 
     #[Test]
     #[DataProvider('reportingProvider')]
@@ -321,9 +291,8 @@ final class OffsetFetcherTest extends TestCase
     #[Test]
     public function anOffsetCursorSurvivesAChangeOfPageSize(): void
     {
-        // The asymmetry that makes offsets the preferred wire format: the cursor
-        // '6' means the same row whatever page size reads it, so a resolver that
-        // changes its chunk size does not invalidate cursors already in flight.
+        // Why offsets are the preferred wire format: a resolver that changes its chunk
+        // size does not invalidate cursors already in flight.
         $all = self::rows(12);
 
         $small = new OffsetApiFetcher($all, 3, TotalsReporting::TotalItems);
@@ -359,9 +328,7 @@ final class OffsetFetcherTest extends TestCase
         self::assertSame(\array_slice($rows, 6, 3), $resumed->items);
     }
 
-    // ------------------------------------------------------------------
     // Exceptions
-    // ------------------------------------------------------------------
 
     /**
      * @return iterable<string, array{0: string}>
@@ -417,12 +384,9 @@ final class OffsetFetcherTest extends TestCase
     #[DataProvider('outOfRangeCursorProvider')]
     public function aCursorTooLargeForThePositionArithmeticIsRejectedNotOverflowed(string $cursor): void
     {
-        // A client hands back whatever `after` it likes, so an absurd offset is
-        // reachable input. Unguarded it overflows the row arithmetic to float and
-        // surfaces as a TypeError from OffsetPage's int parameters — the one thing
-        // fetchPage() promises not to do. The 19-digit case is the nastier half: the
-        // (int) cast saturates at PHP_INT_MAX rather than wrapping, so without the
-        // bound every over-large cursor would silently address the same position.
+        // Clients choose `after`, so this is reachable: unguarded it overflows to float and
+        // surfaces as a TypeError. The 19-digit case matters because (int) saturates at
+        // PHP_INT_MAX, so every over-large cursor would silently address the same position.
         $fetcher = new OffsetApiFetcher(self::rows(5), 3);
 
         $this->expectException(MalformedPageException::class);
@@ -433,8 +397,6 @@ final class OffsetFetcherTest extends TestCase
     #[Test]
     public function theLargestAddressableOffsetIsStillAccepted(): void
     {
-        // One under the rejection boundary must go through, or the guard has eaten a
-        // legal position.
         $fetcher = new OffsetApiFetcher(self::rows(5), 3);
 
         $page = $fetcher->fetchPage((string) (intdiv(\PHP_INT_MAX, 3) - 1));

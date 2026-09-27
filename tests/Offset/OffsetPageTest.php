@@ -10,25 +10,18 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Unit tests for the terminal-condition rule that both positional fetchers
- * delegate to.
- *
- * This is where the precedence table in {@see OffsetPage::hasMoreAfter()} is
- * pinned. The fetcher tests then only have to prove they feed it the right
- * numbers.
+ * The {@see OffsetPage::hasMoreAfter()} precedence table is pinned here, so the
+ * fetcher tests only have to prove they feed it the right numbers.
  */
 final class OffsetPageTest extends TestCase
 {
-    // ------------------------------------------------------------------
     // Precedence between the three signals
-    // ------------------------------------------------------------------
 
     #[Test]
     public function totalPagesWinsOverTotalItemsWhenBothArePresentAndDisagree(): void
     {
-        // An envelope reporting both is the common case; they can only disagree if
-        // the upstream is inconsistent, and totalPages is the signal that answers
-        // the question being asked ("is there another page?") directly.
+        // The two only disagree on an inconsistent upstream, and totalPages answers
+        // "is there another page?" directly.
         $page = new OffsetPage(['a', 'b'], totalItems: 1_000, totalPages: 2);
 
         self::assertTrue($page->hasMoreAfter(pageNumber: 1, itemsThrough: 2, pageSize: 2));
@@ -66,17 +59,14 @@ final class OffsetPageTest extends TestCase
     #[Test]
     public function anOverFullPageKeepsTheWalkGoingRatherThanTruncatingIt(): void
     {
-        // An upstream that ignores the requested limit is broken. Degrading towards
-        // "keep walking" hands the problem to the engine's own guards instead of
-        // silently dropping the rest of the stream.
+        // An upstream ignoring the limit is broken; "keep walking" hands it to the
+        // engine's guards instead of silently dropping the rest of the stream.
         $page = new OffsetPage(['a', 'b', 'c', 'd']);
 
         self::assertTrue($page->hasMoreAfter(pageNumber: 1, itemsThrough: 4, pageSize: 3));
     }
 
-    // ------------------------------------------------------------------
     // Boundaries — exactly at the reported total
-    // ------------------------------------------------------------------
 
     /**
      * @return iterable<string, array{0: int, 1: bool}>
@@ -116,9 +106,7 @@ final class OffsetPageTest extends TestCase
         self::assertSame($expected, $page->hasMoreAfter(pageNumber: 1, itemsThrough: $itemsThrough, pageSize: 1));
     }
 
-    // ------------------------------------------------------------------
     // Zero
-    // ------------------------------------------------------------------
 
     #[Test]
     public function anEmptyPageTerminatesUnderEverySignal(): void
@@ -135,17 +123,13 @@ final class OffsetPageTest extends TestCase
     #[Test]
     public function anEmptyPageThatStillClaimsMoreRowsIsBelievedRatherThanSecondGuessed(): void
     {
-        // A filtered result set can legitimately return no rows while more remain
-        // (the same case Page documents as an empty mid-stream page). The signal is
-        // the envelope's, not ours to overrule.
+        // A filtered result set can legitimately return no rows while more remain.
         $page = new OffsetPage([], totalItems: 100);
 
         self::assertTrue($page->hasMoreAfter(pageNumber: 1, itemsThrough: 0, pageSize: 3));
     }
 
-    // ------------------------------------------------------------------
     // The value object itself
-    // ------------------------------------------------------------------
 
     #[Test]
     public function totalsDefaultToAbsentSoAnUnhelpfulEnvelopeNeedsNoCeremony(): void

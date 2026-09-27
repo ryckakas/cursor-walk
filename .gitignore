@@ -1,26 +1,19 @@
 /vendor/
+/tools/bc-check/vendor/
+/build/
+/tmp/
+/.infection/
+/infection.log
 /.php-cs-fixer.cache
 /.phpunit.cache/
 /.phpunit.result.cache
-
-# Coverage and mutation-testing artifacts
-/build/
-/.infection/
-/infection.log
-
-# Libraries do not commit the lock file; consumers resolve their own versions.
-composer.lock
-
-# A tool installed on its own is an application, not a library: its lock pins every transitive
-# dependency, which is what makes the install reproducible and `composer audit` meaningful.
-!/tools/bc-check/composer.lock
-/tools/bc-check/vendor/
-
-# Scratch space for tooling state; never part of a release
-/tmp/
-
-# Editor / OS noise
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Libraries do not commit the lock file; consumers resolve their own versions.
+composer.lock
+
+# A standalone tool is an application: its lock makes the install reproducible and auditable.
+!/tools/bc-check/composer.lock
