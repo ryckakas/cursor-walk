@@ -8,14 +8,8 @@ use CursorWalk\Page;
 use CursorWalk\Relay\EdgeCursorStrategy;
 
 /**
- * A spying {@see EdgeCursorStrategy} that yields `edge-<index>` and records
- * every call it received.
- *
- * Used by the case-14 tests to prove that an injected strategy fully owns edge
- * cursor derivation, and that it is handed sequential indexes together with the
- * very {@see Page} instance being formatted. Declared as a named class rather
- * than an anonymous one so the recorded properties stay statically typed at the
- * call sites.
+ * A spying {@see EdgeCursorStrategy} that yields `edge-<index>` and records every call.
+ * Named rather than anonymous so the recorded properties stay statically typed at the call sites.
  */
 final class RecordingEdgeCursorStrategy implements EdgeCursorStrategy
 {

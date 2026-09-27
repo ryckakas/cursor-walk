@@ -8,97 +8,27 @@ use CursorWalk\Exception\PageBudgetExceededException;
 use CursorWalk\Exception\PaginationLoopException;
 
 /**
- * The walk POLICY, with no opinion on who performs the fetch: budget accounting,
- * cursor threading, repeated-cursor detection and termination.
- *
- * ## Reach for {@see Paginator} first
- *
- * `Paginator` is the answer for essentially every consumer, and it is implemented
- * in terms of this class, so the two cannot drift. Use `Walk` directly ONLY when
- * you cannot let the library call `fetchPage()` for you:
- *
- *  - a workflow engine whose activities must be reached through `yield`
- *    (Temporal, and anything else replay-based);
- *  - an event loop or coroutine runtime (ReactPHP, Amp, Fibers);
- *  - a driver that prefetches or batches fetches itself.
- *
- * Those callers cannot surrender the call site, and before this class existed
- * they had to reimplement every guard above to get pagination at all. There are
- * deliberately no convenience methods here — no `items()`, no `slice()`. If you
- * want those, you want `Paginator`.
- *
- * ## The protocol: strictly alternating
- *
- * ```php
- * $walk = new Walk($resumeCursor, maxPages: 500);
- *
- * while ($walk->hasNext()) {
- *     $result = yield $this->activity->fetchContacts($walk->nextCursor());
- *     // ... process the page ...
- *     $walk->advance(new Page($result->items, $result->endCursor, $result->hasNextPage));
- * }
- * ```
- *
- * `nextCursor()` then `advance()`, once each, in that order, until `hasNext()`
- * reports false. Any other order is a driver bug and throws `\LogicException` —
- * not for general robustness, but for exception hygiene: a tolerant stepper would
- * let a double `advance()` feed the same page into loop detection twice and raise
- * {@see PaginationLoopException}, the "page the on-call engineer" exception, for
- * what is actually a bug in the driver.
- *
- * ## Single-use, and never shared
- *
- * One walk, one `Walk` instance. Drawing from a finished walk throws — create a
- * new one instead of resetting this one. Never share an instance between
- * concurrent walks, and never register it as a service: `Paginator` is the thing
- * you inject, and it stays stateless.
- *
- * ## Replay safety
- *
- * Every bit of this object's state derives from the {@see Page} values handed to
- * `advance()`, which a replaying workflow engine reproduces identically — so a
- * replayed walk takes exactly the same decisions. Reconstruct that `Page` on the
- * workflow side, as above, rather than marshalling one through a payload
- * converter: converters instantiate via reflection and bypass the constructor
- * that is the only enforcement point of `Page`'s legal states.
- *
- * A guard exception thrown inside workflow code is yours to convert into
- * whatever your engine treats as non-retryable. Left alone, it will be retried
- * forever.
+ * The walk policy as a stepper you drive, for callers that cannot let the
+ * library call fetchPage() (workflow engines, event loops, Fibers); prefer
+ * Paginator otherwise. Single-use: nextCursor() then advance(), once each.
  */
 final class Walk
 {
-    /**
-     * The cursor the next fetch must use; null means "the first page".
-     */
     private ?string $cursor;
 
     private int $fetched = 0;
 
     /**
-     * Cursors already handed out, for repeated-cursor detection. O(pages) memory.
-     *
      * @var array<string, true>
      */
     private array $seen = [];
 
-    /**
-     * Set once the walk can produce nothing further: a page reported no more data,
-     * or a guard rejected the stream.
-     */
     private bool $finished = false;
 
-    /**
-     * True between `nextCursor()` and its matching `advance()`.
-     */
     private bool $awaitingPage = false;
 
     /**
-     * @param string|null $startCursor resume point; null = from the beginning
-     * @param int|null    $maxPages    maximum fetches this walk may draw a cursor
-     *                                 for; null disables the bound. See
-     *                                 {@see Paginator::__construct()} for how to
-     *                                 size it — the reasoning is identical
+     * @param int|null $maxPages maximum cursors this walk may draw; null disables the bound
      */
     public function __construct(?string $startCursor = null, private readonly ?int $maxPages = 10_000)
     {
@@ -111,17 +41,9 @@ final class Walk
     }
 
     /**
-     * Whether the walk still has data to ask for.
-     *
-     * True before the first fetch, including for an empty upstream: one fetch is
-     * always needed to learn there is nothing there.
-     *
-     * Not the same as "the next `nextCursor()` will succeed". The page budget is
-     * enforced in `nextCursor()`, so an exhausted walk still reports `true` here
-     * and throws on the draw — deliberately unlike the loop guard, which marks the
-     * walk finished. A budget that ended the loop quietly would be indistinguishable
-     * from reaching the end of the stream, which is the one thing a resumable
-     * checkpoint must never be.
+     * Whether the walk still has data to ask for. Not "the next nextCursor() will
+     * succeed": an exhausted budget still reports true and throws on the draw, so
+     * it is never mistaken for the end of the stream.
      */
     public function hasNext(): bool
     {
@@ -129,16 +51,12 @@ final class Walk
     }
 
     /**
-     * Draw the cursor for the next fetch, consuming one unit of page budget.
-     *
-     * The budget is checked HERE, before the fetch, so the exception carries the
-     * cursor of a page nobody has paid for yet — pass it back as `$startCursor` to
-     * a fresh `Walk` (or to `Paginator`) to resume with no gaps and no duplicates.
+     * Draw the cursor for the next fetch, consuming one unit of page budget. The
+     * budget is checked before the fetch, so the exception's cursor resumes the
+     * walk with no gaps and no duplicates.
      *
      * @throws PageBudgetExceededException when the budget is exhausted
-     * @throws \LogicException             if the walk is finished, or if the
-     *                                     previous page has not been handed back
-     *                                     via {@see self::advance()} yet
+     * @throws \LogicException             if the walk is finished, or the previous page was not advanced
      */
     public function nextCursor(): ?string
     {
@@ -167,21 +85,13 @@ final class Walk
     }
 
     /**
-     * Hand back the page fetched with the cursor just drawn, so the walk can
-     * decide whether to continue and from where.
+     * Hand back the page fetched with the cursor just drawn. Call it after you
+     * process the page: a page that trips loop detection still holds valid items,
+     * and a per-page checkpoint must include them.
      *
-     * Call this AFTER whatever you do with the page. A page that trips loop
-     * detection has then already been processed, which is deliberate: its items
-     * are valid data already paid for, and a driver that checkpoints per page must
-     * see it, or the position it stores falls behind the data it has.
+     * @param Page<mixed> $page only endCursor and hasNextPage are read
      *
-     * @param Page<mixed> $page the page fetched with the drawn cursor. The item type
-     *                          is irrelevant here: a walk reads only `endCursor` and
-     *                          `hasNextPage`
-     *
-     * @throws PaginationLoopException if the page hands back a cursor this walk has
-     *                                 already used — an upstream or fetcher bug
-     *                                 that would never terminate
+     * @throws PaginationLoopException if the page hands back a cursor this walk already used
      * @throws \LogicException         if no cursor has been drawn for this page
      */
     public function advance(Page $page): void
@@ -203,12 +113,8 @@ final class Walk
 
         $next = $page->endCursor;
 
-        // Not reachable through Page's constructor, which rejects hasNextPage=true
-        // with a null or empty cursor. It stays because advance() is public: a Page
-        // that reached the caller through a payload converter, an unserialize(), or
-        // reflection has never run that validation, and without this stop such a
-        // page would spin forever re-fetching the same cursor. Terminating is the
-        // safe degradation.
+        // Unreachable through Page's constructor, but a Page from unserialize() or
+        // reflection skips it, and stopping beats re-fetching one cursor forever.
         if ($next === null || $next === '') {
             $this->finished = true;
 
@@ -216,8 +122,7 @@ final class Walk
         }
 
         if (isset($this->seen[$next])) {
-            // Terminal: a loop is neither retryable nor resumable, so a driver that
-            // swallows the exception must not be able to keep walking.
+            // Finish first, so a driver that swallows the exception cannot keep walking.
             $this->finished = true;
 
             throw PaginationLoopException::repeatedCursor($next);
@@ -228,11 +133,8 @@ final class Walk
     }
 
     /**
-     * How many cursors this walk has drawn.
-     *
-     * Counted at `nextCursor()` rather than at `advance()`, so a driver that draws
-     * a cursor and then dies before handing the page back has this over-count by
-     * one — the safe direction for a budget.
+     * How many cursors this walk has drawn. Counted at nextCursor(), so a driver
+     * that dies before advance() over-counts by one, the safe direction for a budget.
      */
     public function pagesFetched(): int
     {

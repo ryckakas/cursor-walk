@@ -5,6 +5,5 @@ parameters:
         - tests
         - tools
     excludePaths:
-        # The backward-compatibility checker's own install, not code of this repository; (?) because
-        # only the "Public API" job and `check:ci` install it, so it is usually absent.
+        # Third-party code, and usually absent: only the Public API job and check:ci install it.
         - tools/bc-check/vendor (?)

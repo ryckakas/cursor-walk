@@ -10,22 +10,17 @@ use CursorWalk\Offset\PageNumberFetcher;
 /**
  * An in-memory page-numbered upstream: `?page=N&per_page=S` over a fixed list.
  *
- * Doubles as the canonical doc example for {@see PageNumberFetcher} — a real
- * implementation differs only in swapping `array_slice()` for an HTTP call.
- *
  * @template T
  *
  * @extends PageNumberFetcher<T>
  */
 final class PageNumberApiFetcher extends PageNumberFetcher
 {
-    /** @var list<int> the page numbers requested, in call order */
+    /** @var list<int> */
     private array $requested = [];
 
     /**
-     * @param list<T>          $rows      the complete backing data set
-     * @param int              $pageSize  rows per page
-     * @param TotalsReporting  $reporting which terminal signal the envelope exposes
+     * @param list<T> $rows
      */
     public function __construct(
         private readonly array $rows,

@@ -13,8 +13,6 @@ use PHPUnit\Framework\TestCase;
 final class PageTest extends TestCase
 {
     /**
-     * A non-list array (has gaps or string keys) for constructor-validation tests.
-     *
      * @return array<int|string, string>
      */
     private static function nonListWithGap(): array
@@ -49,7 +47,6 @@ final class PageTest extends TestCase
         ?string $endCursor,
         bool $hasNextPage,
     ): void {
-        // spec case 1
         $this->expectException(MalformedPageException::class);
 
         new Page($items, $endCursor, $hasNextPage);
@@ -58,7 +55,6 @@ final class PageTest extends TestCase
     #[Test]
     public function constructorRejectsNonListItemsWithGap(): void
     {
-        // spec case 1
         $this->expectException(MalformedPageException::class);
 
         /** @phpstan-ignore argument.type */
@@ -68,7 +64,6 @@ final class PageTest extends TestCase
     #[Test]
     public function constructorRejectsNonListItemsWithStringKeys(): void
     {
-        // spec case 1
         $this->expectException(MalformedPageException::class);
 
         /** @phpstan-ignore argument.type */
@@ -78,7 +73,6 @@ final class PageTest extends TestCase
     #[Test]
     public function constructorAllowsTrailingCursorOnFinalPage(): void
     {
-        // hasNextPage=false with a non-null endCursor is explicitly legal.
         $page = new Page(['a', 'b'], 'trailing-cursor', false);
 
         self::assertSame('trailing-cursor', $page->endCursor);
@@ -88,7 +82,6 @@ final class PageTest extends TestCase
     #[Test]
     public function constructorAllowsEmptyItemsWithNextPageAndCursor(): void
     {
-        // an empty mid-stream page is valid as long as a cursor is present.
         $page = new Page([], 'next-cursor', true);
 
         self::assertTrue($page->isEmpty());
@@ -124,7 +117,6 @@ final class PageTest extends TestCase
     #[Test]
     public function emptyPageHasExpectedShape(): void
     {
-        // spec case 2
         $page = Page::empty();
 
         self::assertSame([], $page->items);
@@ -138,7 +130,6 @@ final class PageTest extends TestCase
     #[Test]
     public function emptyPageEqualsFreshlyConstructedEquivalent(): void
     {
-        // spec case 2
         $page = Page::empty();
         $equivalent = new Page([], null, false);
 
