@@ -106,10 +106,18 @@ change that teaches the engine to interpret cursor contents is a design regressi
 
 ### Where the contracts live
 
-There is no `docs/` tree. The documented contract is the **class docblocks**, with `README.md` as
-the recipe mirror and `CHANGELOG.md` as the behavioural record. When changing behaviour, update the
-docblock — it is the source, not commentary. Docblocks here are long on purpose: they carry
-invariants, trade-offs, and traps. Inline comments still follow the usual bar (why, not what).
+The documented contract is the **class docblocks**. Everything else mirrors them:
+
+- `README.md` is the landing page: pitch, install, quick start, the three methods, and links. Keep
+  it short; secondary detail goes in a `<details>` block, and anything longer goes in `docs/`.
+- `docs/recipes.md` holds the how-to recipes, and `docs/design.md` the trade-offs (guards, cursor
+  stability, non-goals, similar packages). The README links to their headings, so renaming one
+  breaks a link.
+- `ROADMAP.md` is what comes next; `CHANGELOG.md` is the behavioural record.
+
+When changing behaviour, update the docblock first — it is the source, not commentary — then the
+doc that mirrors it. Docblocks here are long on purpose: they carry invariants, trade-offs, and
+traps. Inline comments still follow the usual bar (why, not what).
 
 ## Testing
 
