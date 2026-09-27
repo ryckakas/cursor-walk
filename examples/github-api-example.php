@@ -3,32 +3,9 @@
 declare(strict_types=1);
 
 /**
- * cursor-walk: live GitHub REST API example.
- *
- * This script hits the real, public GitHub API (no authentication required,
- * though it is much less rate-limited if you set GITHUB_TOKEN). It is a
- * best-effort demo, NOT a test: it is intentionally excluded from CI (see
- * .github/workflows/ci.yml, which only runs examples/offline-example.php),
- * because live-network scripts should never fail a build over a rate limit
- * or a transient outage.
- *
- * It walks a public repository's tags (`GET /repos/{owner}/{repo}/tags`) and
- * demonstrates the single most common real-world cursor-walk pattern: the
- * opaque cursor IS the upstream's own pagination token, forwarded verbatim.
- * GitHub exposes that token as a `rel="next"` URL in the `Link` response
- * header; TagsFetcher below does nothing more than parse it out and hand it
- * back as `Page::$endCursor`.
- *
- * Usage:
- *   php examples/github-api-example.php [owner] [repo]
- *   GITHUB_TOKEN=ghp_xxx php examples/github-api-example.php torvalds linux
- *
- * Defaults to symfony/symfony if no arguments are given.
- *
- * The script makes at most ~5 HTTP requests total and never throws past its
- * own boundary: any transport failure, non-200 status, rate limit, or
- * malformed response is caught and reported in plain language, then the
- * script exits 0.
+ * cursor-walk live example: walks a GitHub repository's tags through the public REST API.
+ * CI never runs it, because it needs the network. It makes at most 5 requests.
+ * Run it with: [GITHUB_TOKEN=...] php examples/github-api-example.php [owner] [repo]
  */
 
 require __DIR__ . '/../vendor/autoload.php';
@@ -42,28 +19,14 @@ use CursorWalk\Paginator;
 use CursorWalk\Relay\ConnectionFormatter;
 
 /**
- * Raised for anything that stops us from getting a usable HTTP response at
- * all: DNS/connection failures, a non-200 status, and rate limiting.
- *
- * This is deliberately distinct from CursorWalk\Exception\MalformedPageException,
- * which means "we got a response, but could not read it as a page". A
- * fetcher talking to a real upstream generally needs both: one exception
- * type for the upstream being unreachable/unhappy, and the library's own
- * type for the upstream being reachable but lying about its own data shape.
+ * Separate from MalformedPageException on purpose: this one means no usable response arrived,
+ * that one means a response arrived but is not a page.
  */
 final class GitHubApiUnavailable extends \RuntimeException
 {
 }
 
 /**
- * Issues one GET request and returns its status, headers, and body.
- *
- * Pure PHP: file_get_contents() over a stream context, with `ignore_errors`
- * so a 4xx/5xx response body is still readable (by default PHP's HTTP
- * stream wrapper discards the body and returns false on non-2xx statuses).
- * $http_response_header is a magic variable PHP populates in the calling
- * scope after an HTTP stream read; there is no OOP handle for it.
- *
  * @return array{status: int, headers: array<string, string>, body: string}
  */
 function httpGet(string $url, ?string $token): array
@@ -83,6 +46,7 @@ function httpGet(string $url, ?string $token): array
         'http' => [
             'method' => 'GET',
             'header' => implode("\r\n", $requestHeaders),
+            // Without it PHP's HTTP wrapper returns false on non-2xx and drops the error body.
             'ignore_errors' => true,
             'timeout' => 10,
         ],
@@ -118,13 +82,7 @@ function httpGet(string $url, ?string $token): array
 }
 
 /**
- * Parses an RFC 8288-style `Link` header into rel => URL.
- *
- * Format: `<https://…&page=2>; rel="next", <https://…&page=9>; rel="last"`.
- * Handles multiple comma-separated links and both quoted and unquoted rel
- * values.
- *
- * @return array<string, string>
+ * @return array<string, string> rel => URL
  */
 function parseLinkHeader(string $header): array
 {
@@ -142,15 +100,8 @@ function parseLinkHeader(string $header): array
 }
 
 /**
- * Fetches a repository's tags, one upstream page at a time.
- *
- * The teaching point: the cursor this fetcher hands back is not something WE
- * construct — it is GitHub's own `rel="next"` Link URL, passed straight
- * through as an opaque string. `fetchPage(null)` requests the caller-given
- * starting URL; every other call requests exactly the cursor it was given,
- * verbatim, with no re-derivation of query parameters. Wrapping an upstream's
- * native pagination token as an opaque cursor-walk cursor like this is the
- * general pattern for adapting almost any paginated REST API.
+ * The cursor is GitHub's own `rel="next"` Link URL, requested verbatim and never rebuilt.
+ * Forwarding an upstream's native token as the opaque cursor adapts almost any paginated REST API.
  *
  * @implements PaginatedFetcher<array{name: string, commit: string}>
  */
@@ -248,10 +199,6 @@ final class TagsFetcher implements PaginatedFetcher
     }
 }
 
-// ---------------------------------------------------------------------------
-// Demo
-// ---------------------------------------------------------------------------
-
 // == a. items() bounded by a small maxPages, streaming as it goes ============
 function demoStreaming(string $initialUrl, ?string $token): void
 {
@@ -265,8 +212,6 @@ function demoStreaming(string $initialUrl, ?string $token): void
             printf("  %s (%s)\n", $tag['name'], $tag['commit']);
         }
     } catch (PageBudgetExceededException $e) {
-        // Expected and informative, not an error: it proves the walk really
-        // is bounded at maxPages upstream requests, however many tags exist.
         printf(
             "  ...stopped after the %d-page budget (this is the safety guard working as intended).\n",
             $e->getMaxPages(),
@@ -302,19 +247,14 @@ function demoCheckpoint(string $initialUrl, ?string $token): void
         printf("  fetched %d tag(s); hasNextPage=%s\n", $page->count(), $page->hasNextPage ? 'true' : 'false');
 
         if ($page->hasNextPage) {
-            // This IS the literal GitHub "next page" URL — persist it exactly
-            // as-is (a row, a cache key, a queue message) to resume later.
             printf("  checkpoint (verbatim GitHub URL): %s\n", $page->endCursor);
         }
 
-        break; // One page is enough to show the shape; see (a) for streaming all of it.
+        break; // One page shows the shape; without the break this unbounded walk would fetch every tag.
     }
 }
 
-/**
- * Reports why the demo stopped and exits 0: a live-network example must never fail a caller over an
- * outage or a rate limit.
- */
+/** Exits 0: a live-network example must never fail its caller over an outage or a rate limit. */
 function exitCleanly(string $report): never
 {
     printf("\n%s\n", $report);

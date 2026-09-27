@@ -9,14 +9,9 @@ use CursorWalk\Page;
 use CursorWalk\PaginatedFetcher;
 
 /**
- * A never-ending upstream that always reports `hasNextPage: true` and always
- * hands back a *fresh* cursor.
- *
- * Repeated-cursor detection cannot catch this shape — only the page budget
- * can — so this is the fixture for {@see \CursorWalk\Exception\PageBudgetExceededException}.
- *
- * Cursors are positional, so resuming from the exception's `getLastCursor()`
- * continues exactly where iteration stopped: no duplicates, no gaps.
+ * A never-ending upstream with a fresh cursor every page. Loop detection cannot catch it, so it is
+ * the fixture for {@see \CursorWalk\Exception\PageBudgetExceededException}. Cursors are positional,
+ * so resuming from `getLastCursor()` continues with no duplicates and no gaps.
  *
  * @implements PaginatedFetcher<string>
  */
@@ -30,17 +25,11 @@ final class InfiniteFetcher implements PaginatedFetcher
     {
     }
 
-    /**
-     * The opaque cursor addressing the item at $offset in the virtual stream.
-     */
     public static function cursorFor(int $offset): string
     {
         return base64_encode(self::CURSOR_PREFIX . $offset);
     }
 
-    /**
-     * The item this fetcher emits at $offset in the virtual stream.
-     */
     public static function itemAt(int $offset): string
     {
         return 'item-' . $offset;

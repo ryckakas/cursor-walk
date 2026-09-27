@@ -3,20 +3,8 @@
 declare(strict_types=1);
 
 /**
- * cursor-walk: offline example / CI smoke test.
- *
- * Zero network calls. Everything here runs against an in-memory fetcher, so
- * the output is fully deterministic and this script is safe to run in CI
- * (see .github/workflows/ci.yml) as a smoke test on top of the unit suite.
- *
- * It walks through the library end to end:
- *   1. Paginator::items()   — lazy item iteration
- *   2. early break          — proving laziness (no over-fetching)
- *   3. Paginator::pages()   — per-page checkpointing
- *   4. Paginator::slice()   + Relay\ConnectionFormatter — the GraphQL resolver flow
- *   5. CursorCodec          — decoding a client-facing edge cursor and resuming
- *   6. Paginator(maxPages)  — the page-budget safety guard, and resuming past it
- *
+ * cursor-walk offline example and CI smoke test.
+ * It uses an in-memory fetcher and no network, so its output is deterministic and safe for CI.
  * Run it with: php examples/offline-example.php
  */
 
@@ -27,12 +15,8 @@ use CursorWalk\Exception\PageBudgetExceededException;
 use CursorWalk\Page;
 use CursorWalk\Paginator;
 use CursorWalk\Relay\ConnectionFormatter;
-// ArrayFetcher and CountingFetcher are test fixtures, not part of the public
-// library API. They live under tests/Support and are autoloaded only because
-// composer's "autoload-dev" (CursorWalk\Tests\ -> tests/) is installed along
-// with the rest of the dev dependencies. They double as the canonical example
-// of, respectively, "the two things every fetcher must do" and "how to spy on
-// fetchPage() calls to prove laziness" — see their docblocks.
+// Test fixtures, not public API. Only composer's "autoload-dev" loads them,
+// so this example needs a dev install.
 use CursorWalk\Tests\Support\ArrayFetcher;
 use CursorWalk\Tests\Support\CountingFetcher;
 
@@ -46,10 +30,7 @@ if (!class_exists(ArrayFetcher::class) || !class_exists(CountingFetcher::class))
     exit(1);
 }
 
-/**
- * Fails loudly instead of using assert(), which is disabled by default under
- * production php.ini settings (zend.assertions = -1) and would silently no-op.
- */
+/** Not assert(): production php.ini sets zend.assertions = -1, which makes it a silent no-op. */
 function check(bool $condition, string $message): void
 {
     if (!$condition) {
@@ -58,7 +39,6 @@ function check(bool $condition, string $message): void
     }
 }
 
-/** Shortens an opaque cursor for readable printing. Display-only; never decode a truncated cursor. */
 function shortCursor(?string $cursor): string
 {
     if ($cursor === null) {
@@ -137,9 +117,7 @@ function demoPageCheckpoints(Paginator $paginator, array $dataset, int $pageSize
         );
 
         if ($pageCount === 1) {
-            // A real batch job would persist this in durable storage (a row, a
-            // key-value store, a queue message) right here, only after the page's
-            // work has been committed. We just hold it in a variable.
+            // A real job persists this durably, and only after the page's work has committed.
             $checkpointAfterFirstPage = $page->endCursor;
         }
     }
@@ -168,8 +146,7 @@ function demoPageCheckpoints(Paginator $paginator, array $dataset, int $pageSize
 /**
  * @param list<array{id: int, name: string}> $dataset
  *
- * @return array{Page<array{id: int, name: string}>, array<string, mixed>} the slice and its connection,
- *                                                                         which section 5 resumes from
+ * @return array{Page<array{id: int, name: string}>, array<string, mixed>}
  */
 function demoRelayConnection(Paginator $paginator, array $dataset, int $pageSize): array
 {
@@ -183,8 +160,6 @@ function demoRelayConnection(Paginator $paginator, array $dataset, int $pageSize
     $formatter = new ConnectionFormatter();
     $connection = $formatter->format(
         $slicePage,
-        // The nodeMapper is where you shape a raw row into the public GraphQL
-        // node — renaming/casting fields, dropping internal ones, etc.
         static fn (array $row): array => [
             'id' => (string) $row['id'],
             'label' => strtoupper($row['name']),
@@ -210,11 +185,9 @@ function demoCursorRoundTrip(Paginator $paginator, array $dataset, int $pageSize
 {
     printf("\n== 5. cursor round trip ==\n");
 
-    // Pick a cursor from the MIDDLE of the slice (index 1 of 4), not a page
-    // boundary — this is the case that matters: a Relay client can send back
-    // `after` pointing anywhere within a page, not just at its edges.
+    // A mid-page edge, not a page boundary: a Relay client's `after` can point anywhere within a page.
     $midEdge = $connection['edges'][1];
-    $alreadySeenIds = array_column(array_slice($slicePage->items, 0, 2), 'id'); // items at index 0 and 1
+    $alreadySeenIds = array_column(array_slice($slicePage->items, 0, 2), 'id');
 
     printf(
         "resuming after edge for '%s' (cursor %s)\n",
@@ -277,7 +250,6 @@ function demoPageBudget(Paginator $paginator, array $dataset, int $pageSize): vo
     check($budgetExceptionCaught, 'a Paginator(maxPages: 2) walking a 4-page dataset must throw PageBudgetExceededException');
     check($pagesBeforeBudget === 2, 'the budget should allow exactly maxPages pages through before throwing');
 
-    // Resume, with an unbounded paginator, from exactly where the budget stopped.
     $idsAfterResume = [];
     foreach ($paginator->pages(new ArrayFetcher($dataset, $pageSize), $lastCursor) as $page) {
         foreach ($page->items as $item) {
@@ -296,9 +268,7 @@ function demoPageBudget(Paginator $paginator, array $dataset, int $pageSize): vo
     );
 }
 
-// A small, deterministic dataset. Arrays (rather than scalars) make the
-// nodeMapper demo in section 4 realistic: this is the shape a database row or
-// an API resource usually has.
+// Rows rather than scalars, so the nodeMapper in section 4 has fields to shape.
 $dataset = [
     ['id' => 0, 'name' => 'apple'],
     ['id' => 1, 'name' => 'banana'],
@@ -311,7 +281,7 @@ $dataset = [
     ['id' => 8, 'name' => 'kiwi'],
     ['id' => 9, 'name' => 'lemon'],
 ];
-$pageSize = 3; // 10 items / 3 per page = 4 pages: sizes 3, 3, 3, 1.
+$pageSize = 3;
 $expectedPageCount = (int) ceil(count($dataset) / $pageSize);
 
 $paginator = new Paginator();

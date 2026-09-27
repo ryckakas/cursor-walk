@@ -16,74 +16,25 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
-/**
- * Tests for the Relay connection formatter.
- *
- * ============================================================================
- * INTEGRATION NOTES — API assumptions baked into this file
- * ============================================================================
- * Notes 1-3 were written before src landed and have since been VERIFIED against
- * `src/Relay/ConnectionFormatter.php`, `EdgeCursorStrategy.php` and
- * `OffsetEdgeCursorStrategy.php` — they all hold. Note 4 records a conflict that
- * was found and resolved in favour of src.
- *
- * 1. STRATEGY INJECTION. `ConnectionFormatter` receives its `EdgeCursorStrategy`
- *    through the CONSTRUCTOR, with an optional default:
- *        new ConnectionFormatter()          -> OffsetEdgeCursorStrategy
- *        new ConnectionFormatter($strategy) -> $strategy
- *    Every custom-strategy formatter here is built by {@see self::formatterWith()}
- *    — that is the single call site to change if src differs.
- *
- * 2. PRODUCING PAGE CURSOR. For per-edge cursors to be RESUMABLE they must encode
- *    the cursor that PRODUCED the page, not `$page->endCursor` (which produces the
- *    NEXT page). We assume src threads it as an optional named parameter
- *    `pageStartCursor` on both `ConnectionFormatter::format()` and
- *    `EdgeCursorStrategy::cursorForEdge()`. Every call that needs it goes through
- *    {@see self::formatFrom()} — the single call site to change if the parameter
- *    ended up named differently (e.g. $producingCursor / $pageCursor).
- *
- * 3. EDGE CURSOR SEMANTICS. An edge cursor addresses the position AFTER that edge
- *    (Relay `after:` semantics): decoding edge `i`'s cursor must yield
- *    `[$producingPageCursor, $i + 1]`. Case 19 is the specification for this.
- *    Confirmed: `OffsetEdgeCursorStrategy::cursorForEdge()` encodes `index + 1`.
- *
- * 4. RESOLVED — `pageInfo.endCursor` IS `Page::$endCursor`, NOT the last edge's
- *    cursor. These tests originally asserted the strict-Relay reading (endCursor
- *    == last edge cursor); src deliberately emits the page-level anchor instead,
- *    with a documented rationale: for a multi-page `slice()` every edge is
- *    anchored to the slice START, so resuming from the last EDGE cursor would
- *    replay up to `first` items, whereas `Page::$endCursor` is anchored to the
- *    last upstream page touched and keeps "load more" O(1). Both denote the same
- *    logical position; only src's is cheap to resume from. The spec (section 4.5
- *    / test case 12) constrains the KEYS, not this value, so the tests were
- *    aligned to src. `startCursor` remains the first edge's cursor.
- * ============================================================================
- */
 final class ConnectionFormatterTest extends TestCase
 {
     private const ALPHABET = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'];
 
-    // ------------------------------------------------------------------
     // Case 12 — output shape matches the Relay spec keys exactly
-    // ------------------------------------------------------------------
 
     #[Test]
     public function outputShapeMatchesRelaySpecKeysExactly(): void
     {
-        // Case 12: top-level key list, pageInfo key set, edge key set.
         $formatter = new ConnectionFormatter();
         $page = $this->pageOf(['a', 'b', 'c'], 'next-page-cursor', true, 42);
 
         $result = $formatter->format($page);
 
-        // `totalCount` is a SIBLING of edges/pageInfo, not nested inside either.
         self::assertSame(['edges', 'pageInfo', 'totalCount'], array_keys($result));
 
         $pageInfo = self::pageInfoOf($result);
 
-        // INTEGRATION NOTE: key ORDER inside pageInfo is not semantically
-        // meaningful, so this asserts the key SET only. A different order in src
-        // is fine; a different SET is a src bug.
+        // Key order inside pageInfo carries no meaning, so only the key set is asserted.
         self::assertEqualsCanonicalizing(
             ['endCursor', 'hasNextPage', 'startCursor', 'hasPreviousPage'],
             array_keys($pageInfo),
@@ -94,7 +45,6 @@ final class ConnectionFormatterTest extends TestCase
         self::assertArrayHasKey('startCursor', $pageInfo);
         self::assertArrayHasKey('hasPreviousPage', $pageInfo);
 
-        // Every edge is exactly {node, cursor} — no extras, no omissions.
         $edges = self::edgesOf($result);
         self::assertCount(3, $edges);
 
@@ -111,7 +61,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function edgeCursorsAreNonEmptyStringsAndUniqueWithinThePage(): void
     {
-        // Case 12: edge cursors are non-empty strings, unique per page.
         $formatter = new ConnectionFormatter();
         $page = $this->pageOf(['a', 'b', 'c', 'd'], 'next-page-cursor', true);
 
@@ -133,10 +82,9 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function pageInfoStartCursorIsTheFirstEdgeAndEndCursorIsThePageResumeAnchor(): void
     {
-        // Case 12: startCursor = FIRST edge cursor (per the Relay spec);
-        // endCursor = Page::$endCursor, the library's canonical resume anchor.
-        // See RESOLVED NOTE #4 in the class docblock for why endCursor is NOT
-        // re-derived from the last edge.
+        // Not the last edge's cursor: slice() anchors every edge to the slice start, so
+        // resuming from it would replay items. Page::$endCursor anchors to the last
+        // upstream page touched, which keeps "load more" O(1).
         $formatter = new ConnectionFormatter();
         $page = $this->pageOf(['a', 'b', 'c', 'd'], 'next-page-cursor', true);
 
@@ -156,7 +104,6 @@ final class ConnectionFormatterTest extends TestCase
     #[DataProvider('hasNextPageProvider')]
     public function hasNextPageMirrorsThePage(bool $hasNextPage): void
     {
-        // Case 12: hasNextPage mirrors Page::$hasNextPage.
         $formatter = new ConnectionFormatter();
         $page = $this->pageOf(['a', 'b'], $hasNextPage ? 'next-page-cursor' : null, $hasNextPage);
 
@@ -176,14 +123,9 @@ final class ConnectionFormatterTest extends TestCase
         ];
     }
 
-    // ------------------------------------------------------------------
     // hasPreviousPage — derived from the page's own start position
-    // ------------------------------------------------------------------
 
     /**
-     * Every kind of `$pageStartCursor` a caller can legitimately pass, and whether
-     * it proves something precedes the window.
-     *
      * @return iterable<string, array{0: ?string, 1: bool}>
      */
     public static function pageStartCursorProvider(): iterable
@@ -206,13 +148,8 @@ final class ConnectionFormatterTest extends TestCase
         ?string $pageStartCursor,
         bool $expected,
     ): void {
-        // A non-origin start position is PROOF that elements precede the window,
-        // which the Relay spec allows a server to report whenever it can determine
-        // it efficiently. Before this, every page after the first lied.
-        //
-        // The `encode(null, 0)` case is why this cannot be a bare "is the string
-        // non-empty?" check: the documented resolver recipe passes exactly that for
-        // a first request, and it must still report false.
+        // `encode(null, 0)` is why this cannot be a bare "non-empty string" check: the
+        // documented resolver recipe passes exactly that for a first request.
         $formatter = new ConnectionFormatter();
         $page = $this->pageOf(['a', 'b'], 'next-page-cursor', true);
 
@@ -224,8 +161,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function hasPreviousPageIsIndependentOfWhetherThePageItselfHasItems(): void
     {
-        // An empty page fetched with a real cursor still has something before it —
-        // the emptiness says nothing about the window's position in the stream.
         $result = (new ConnectionFormatter())->format(Page::empty(), null, 'some-upstream-cursor');
         $pageInfo = self::pageInfoOf($result);
 
@@ -237,8 +172,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function walkingAStreamReportsHasPreviousPageFalseOnlyForTheFirstWindow(): void
     {
-        // End to end over a real walk: format each window with the cursor it was
-        // fetched with, and only the origin window may claim nothing precedes it.
         $fetcher = new ArrayFetcher(self::ALPHABET, pageSize: 4);
         $formatter = new ConnectionFormatter();
 
@@ -262,7 +195,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function totalCountKeyIsAbsentWhenThePageHasNoTotalCount(): void
     {
-        // Case 12: the key must be ABSENT, not present-and-null.
         $formatter = new ConnectionFormatter();
         $page = $this->pageOf(['a', 'b'], 'next-page-cursor', true, null);
 
@@ -275,7 +207,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function totalCountOfZeroIsEmittedRatherThanDroppedAsFalsy(): void
     {
-        // Case 12: 0 is a real total, not "no total".
         $formatter = new ConnectionFormatter();
         $page = $this->pageOf([], null, false, 0);
 
@@ -289,7 +220,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function emptyPageProducesAnEmptyConnectionWithNullBoundaryCursors(): void
     {
-        // Case 12: Page::empty() formats to a well-formed empty connection.
         $formatter = new ConnectionFormatter();
 
         $result = $formatter->format(Page::empty());
@@ -304,14 +234,11 @@ final class ConnectionFormatterTest extends TestCase
         self::assertFalse($pageInfo['hasPreviousPage']);
     }
 
-    // ------------------------------------------------------------------
     // Case 13 — nodeMapper transforms nodes
-    // ------------------------------------------------------------------
 
     #[Test]
     public function nodeMapperTransformsEveryNode(): void
     {
-        // Case 13: the mapper's return value becomes the edge node.
         $formatter = new ConnectionFormatter();
 
         $strings = $formatter->format(
@@ -330,7 +257,7 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function nodeMapperLeavesEdgeCursorsAndPageInfoUntouched(): void
     {
-        // Case 13: cursors address positions, not node contents.
+        // Cursors address positions, not node contents.
         $formatter = new ConnectionFormatter();
         $page = $this->pageOf(self::people(), 'next-page-cursor', true);
 
@@ -354,7 +281,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function nodeMapperIsCalledExactlyOncePerItemInOrder(): void
     {
-        // Case 13: no double-mapping, no skipped items, source order preserved.
         $formatter = new ConnectionFormatter();
         $page = $this->pageOf(self::people(), 'next-page-cursor', true);
 
@@ -381,7 +307,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function nodeMapperIsNeverCalledForAnEmptyPage(): void
     {
-        // Case 13: nothing to map means nothing to call.
         $formatter = new ConnectionFormatter();
 
         /** @var list<mixed> $seen */
@@ -399,14 +324,11 @@ final class ConnectionFormatterTest extends TestCase
         self::assertSame([], self::edgesOf($result));
     }
 
-    // ------------------------------------------------------------------
     // Case 14 — custom EdgeCursorStrategy is honored
-    // ------------------------------------------------------------------
 
     #[Test]
     public function customEdgeCursorStrategySuppliesEveryEdgeCursor(): void
     {
-        // Case 14: the injected strategy fully controls edge cursors.
         $strategy = new RecordingEdgeCursorStrategy();
         $formatter = self::formatterWith($strategy);
         $page = $this->pageOf(['a', 'b', 'c', 'd'], 'next-page-cursor', true);
@@ -420,9 +342,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function pageInfoStartCursorComesFromTheCustomStrategy(): void
     {
-        // Case 14: startCursor is computed from the first EDGE, so a custom
-        // strategy controls it. endCursor stays the page-level resume anchor and
-        // is therefore untouched by the strategy (RESOLVED NOTE #4).
         $strategy = new RecordingEdgeCursorStrategy();
         $formatter = self::formatterWith($strategy);
         $page = $this->pageOf(['a', 'b', 'c', 'd'], 'next-page-cursor', true);
@@ -440,8 +359,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function customEdgeCursorStrategyReceivesSequentialIndexesAndTheSamePageInstance(): void
     {
-        // Case 14: indexes are 0..n-1 in order, and the strategy sees the very
-        // Page instance being formatted.
         $strategy = new RecordingEdgeCursorStrategy();
         $formatter = self::formatterWith($strategy);
         $page = $this->pageOf(['a', 'b', 'c', 'd'], 'next-page-cursor', true);
@@ -459,7 +376,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function customEdgeCursorStrategyIsNotConsultedForAnEmptyPage(): void
     {
-        // Case 14: no edges, no strategy calls.
         $strategy = new RecordingEdgeCursorStrategy();
 
         $result = self::formatterWith($strategy)->format(Page::empty());
@@ -468,9 +384,7 @@ final class ConnectionFormatterTest extends TestCase
         self::assertSame([], self::edgesOf($result));
     }
 
-    // ------------------------------------------------------------------
     // Case 19 — end-to-end Relay round trip
-    // ------------------------------------------------------------------
 
     /**
      * @param list<string> $expectedTail
@@ -483,13 +397,8 @@ final class ConnectionFormatterTest extends TestCase
         string $expectedNode,
         array $expectedTail,
     ): void {
-        // Case 19: fetch a page -> format it -> take an edge cursor -> decode it
-        // -> feed it back to Paginator::items() -> get exactly the tail that
-        // follows the chosen edge.
-        //
-        // CONVENTION UNDER TEST: an edge cursor addresses the position AFTER that
-        // edge (Relay `after:` semantics), i.e. decoding edge `i`'s cursor yields
-        // skip === i + 1 relative to the cursor that PRODUCED the page.
+        // An edge cursor addresses the position AFTER its edge (Relay `after:`), so edge
+        // i decodes to skip i + 1 relative to the cursor that produced the page.
         $fetcher = new ArrayFetcher(self::ALPHABET, pageSize: 4);
         $formatter = new ConnectionFormatter();
 
@@ -505,10 +414,7 @@ final class ConnectionFormatterTest extends TestCase
         $edgeCursor = self::cursorsOf($result)[$edgeIndex];
         [$resumeCursor, $skip] = (new CursorCodec())->decode($edgeCursor);
 
-        // INTEGRATION NOTE: a mid-page edge cursor must carry a NON-ZERO skip.
-        // If src encodes offset `i` instead of `i + 1`, THIS TEST IS THE
-        // SPECIFICATION and src must be adjusted. The resumed list below is the
-        // binding assertion; this one only localises the failure.
+        // Only localises an `i` vs `i + 1` encoding bug; the resumed list is the binding assertion.
         self::assertGreaterThan(0, $skip, 'a mid-page edge cursor must encode a non-zero skip');
 
         /** @var list<string> $resumed */
@@ -538,7 +444,6 @@ final class ConnectionFormatterTest extends TestCase
         string $expectedNode,
         array $expectedTail,
     ): void {
-        // Case 19: same round trip, resumed with slice() instead of items().
         $fetcher = new ArrayFetcher(self::ALPHABET, pageSize: 4);
         $formatter = new ConnectionFormatter();
 
@@ -563,11 +468,6 @@ final class ConnectionFormatterTest extends TestCase
     }
 
     /**
-     * Data set ['a'..'i'] with pageSize 4:
-     *   page 1 (producing cursor null)         -> a b c d
-     *   page 2 (producing cursor cursorFor(4)) -> e f g h
-     *   page 3 (producing cursor cursorFor(8)) -> i
-     *
      * @return array<string, array{0: ?string, 1: int, 2: string, 3: list<string>}>
      */
     public static function roundTripProvider(): array
@@ -580,16 +480,12 @@ final class ConnectionFormatterTest extends TestCase
         ];
     }
 
-    // ------------------------------------------------------------------
     // Extra coverage
-    // ------------------------------------------------------------------
 
     #[Test]
     #[DataProvider('producingCursorProvider')]
     public function defaultStrategyEmitsSyntheticCursorsThatTheCodecRecognises(?string $producingCursor): void
     {
-        // extra: locks in the OffsetEdgeCursorStrategy <-> CursorCodec pairing.
-        // A FOREIGN cursor decodes to [$cursor, 0]; a synthetic one must not.
         $fetcher = new ArrayFetcher(self::ALPHABET, pageSize: 4);
         $formatter = new ConnectionFormatter();
 
@@ -626,8 +522,6 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function defaultStrategyMatchesAnExplicitlyInjectedOffsetEdgeCursorStrategy(): void
     {
-        // extra: pins INTEGRATION NOTE #1 — the no-arg constructor must default
-        // to OffsetEdgeCursorStrategy.
         $fetcher = new ArrayFetcher(self::ALPHABET, pageSize: 4);
         $page = $fetcher->fetchPage(null);
 
@@ -640,8 +534,7 @@ final class ConnectionFormatterTest extends TestCase
     #[Test]
     public function formattingAPageProducedBySliceYieldsASaneConnection(): void
     {
-        // extra: slice() pages already carry a SYNTHETIC mid-page endCursor;
-        // formatting one must still produce a well-formed connection.
+        // slice() pages carry a synthetic mid-page endCursor, unlike a raw upstream page.
         $fetcher = new ArrayFetcher(self::ALPHABET, pageSize: 4);
 
         $slice = (new Paginator())->slice($fetcher, 3, null, 2);
@@ -669,16 +562,9 @@ final class ConnectionFormatterTest extends TestCase
         );
     }
 
-    // ------------------------------------------------------------------
-    // Helpers — deliberately few call sites, see INTEGRATION NOTES above
-    // ------------------------------------------------------------------
+    // Helpers
 
     /**
-     * INTEGRATION NOTE: the producing page cursor is passed BY NAME so that this
-     * is the only call site to touch if the src author named the parameter
-     * differently (e.g. $producingCursor / $pageCursor) or threaded it another
-     * way. Tests that do not exercise resumability call format() directly.
-     *
      * @param Page<mixed>                 $page
      * @param null|callable(mixed): mixed $nodeMapper
      *
@@ -693,10 +579,6 @@ final class ConnectionFormatterTest extends TestCase
         return $formatter->format($page, $nodeMapper, pageStartCursor: $producingCursor);
     }
 
-    /**
-     * INTEGRATION NOTE: single construction site for a custom-strategy formatter
-     * (assumption #1 — constructor injection).
-     */
     private static function formatterWith(EdgeCursorStrategy $strategy): ConnectionFormatter
     {
         return new ConnectionFormatter($strategy);
@@ -747,9 +629,6 @@ final class ConnectionFormatterTest extends TestCase
     }
 
     /**
-     * Narrow the formatter's output to a list of edges, asserting the structure
-     * on the way through so downstream assertions read cleanly.
-     *
      * @return list<array<string, mixed>>
      */
     private static function edgesOf(mixed $connection): array

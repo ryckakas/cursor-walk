@@ -10,14 +10,7 @@ use CursorWalk\PaginatedFetcher;
 
 /**
  * An in-memory {@see PaginatedFetcher} over a fixed list of items.
- *
- * Doubles as the canonical doc example: it shows the two things every real
- * fetcher must do — translate an opaque `$cursor` into an upstream request,
- * and translate the upstream response back into a {@see Page}.
- *
- * Cursors are deliberately opaque-looking (base64 of an internal marker)
- * rather than bare integers, so tests exercise the same code paths a real
- * upstream cursor would.
+ * Cursors are base64 rather than bare integers, so tests exercise opaque cursors like a real upstream's.
  *
  * @template T
  *
@@ -28,9 +21,7 @@ final class ArrayFetcher implements PaginatedFetcher
     private const CURSOR_PREFIX = 'offset-';
 
     /**
-     * @param list<T> $items    the complete backing data set
-     * @param int     $pageSize how many items each fetchPage() call returns
-     * @param bool    $withTotalCount whether pages report Page::$totalCount
+     * @param list<T> $items
      */
     public function __construct(
         private readonly array $items,
@@ -39,12 +30,6 @@ final class ArrayFetcher implements PaginatedFetcher
     ) {
     }
 
-    /**
-     * Build the opaque cursor that addresses the item at $offset.
-     *
-     * Exposed so tests can assert on exact cursor values without duplicating
-     * the encoding rule.
-     */
     public static function cursorFor(int $offset): string
     {
         return base64_encode(self::CURSOR_PREFIX . $offset);

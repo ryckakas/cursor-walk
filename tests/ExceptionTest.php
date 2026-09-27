@@ -66,12 +66,6 @@ final class ExceptionTest extends TestCase
         self::assertStringContainsString('10', $exception->getMessage());
     }
 
-    // INTEGRATION NOTE: the spec does not fix how PageBudgetExceededException
-    // attaches a "last cursor" to the exceeded() factory. This call assumes the
-    // factory signature is widened to exceeded(int $maxPages, ?string $lastCursor = null).
-    // If the src author instead exposes a `withLastCursor()` wither, a different
-    // constructor argument order, or another mechanism entirely, only this one
-    // call site (and its two assertions below) needs adjusting.
     #[Test]
     public function exceededCarriesLastCursorWhenProvided(): void
     {

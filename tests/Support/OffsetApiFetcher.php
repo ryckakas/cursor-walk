@@ -10,21 +10,17 @@ use CursorWalk\Offset\OffsetPage;
 /**
  * An in-memory offset-based upstream: `?offset=N&limit=S` over a fixed list.
  *
- * Doubles as the canonical doc example for {@see OffsetFetcher}.
- *
  * @template T
  *
  * @extends OffsetFetcher<T>
  */
 final class OffsetApiFetcher extends OffsetFetcher
 {
-    /** @var list<int> the offsets requested, in call order */
+    /** @var list<int> */
     private array $requested = [];
 
     /**
-     * @param list<T>         $rows      the complete backing data set
-     * @param int             $pageSize  rows per request
-     * @param TotalsReporting $reporting which terminal signal the envelope exposes
+     * @param list<T> $rows
      */
     public function __construct(
         private readonly array $rows,

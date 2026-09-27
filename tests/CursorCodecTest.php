@@ -26,7 +26,6 @@ final class CursorCodecTest extends TestCase
     #[DataProvider('roundTripProvider')]
     public function encodeThenDecodeRoundTripsThePair(?string $pageCursor, int $offset): void
     {
-        // spec case 16
         $codec = new CursorCodec();
 
         $encoded = $codec->encode($pageCursor, $offset);
@@ -49,16 +48,13 @@ final class CursorCodecTest extends TestCase
         yield 'unicode content' => ["caf\u{e9}-\u{1f680}-\u{4e2d}\u{6587}", 6];
         yield 'newlines and tabs' => ["line1\nline2\tend", 7];
 
-        // NOTE: a raw-bytes case such as "\x00\x01\xff" is intentionally omitted:
-        // json_encode() fails on invalid UTF-8 byte sequences, so that input can
-        // never survive the codec's json_encode() call regardless of correctness.
+        // No raw-bytes case: json_encode() rejects invalid UTF-8, so such a cursor can never be encoded.
     }
 
     #[Test]
     #[DataProvider('hostilePageCursorProvider')]
     public function roundTripSurvivesHostilePageCursorContent(string $pageCursor, int $offset): void
     {
-        // spec case 16a
         $codec = new CursorCodec();
 
         $encoded = $codec->encode($pageCursor, $offset);
@@ -71,17 +67,13 @@ final class CursorCodecTest extends TestCase
     #[Test]
     public function roundTripPreservesEmptyStringCursorDistinctFromNull(): void
     {
-        // spec case 16a
         $codec = new CursorCodec();
 
         $encodedEmpty = $codec->encode('', 9);
         $encodedNull = $codec->encode(null, 9);
 
-        // The whole point: '' and null are DIFFERENT positions ('' is a real,
-        // if unusual, upstream cursor; null means "the first page"), so they
-        // must not encode to the same token nor collapse into each other on the
-        // way back. assertSame on the full tuple is what proves it — '' == null
-        // in PHP, so a loose comparison here would pass either way.
+        // '' is a real upstream cursor and null means the first page. assertSame on the full tuple
+        // matters: '' == null in PHP, so a loose comparison would pass either way.
         self::assertNotSame($encodedNull, $encodedEmpty);
         self::assertSame(['', 9], $codec->decode($encodedEmpty));
         self::assertSame([null, 9], $codec->decode($encodedNull));
@@ -105,7 +97,6 @@ final class CursorCodecTest extends TestCase
     #[DataProvider('foreignButValidBase64Provider')]
     public function decodeTreatsValidBase64WithoutUsableEnvelopeAsForeign(string $input): void
     {
-        // spec case 16b
         $codec = new CursorCodec();
 
         [$cursor, $offset] = $codec->decode($input);
@@ -130,7 +121,6 @@ final class CursorCodecTest extends TestCase
     #[DataProvider('foreignUpstreamCursorProvider')]
     public function decodeNeverThrowsOnForeignUpstreamCursorAndReturnsItUnchanged(string $input): void
     {
-        // spec case 17
         $codec = new CursorCodec();
 
         [$cursor, $offset] = $codec->decode($input);
@@ -144,9 +134,8 @@ final class CursorCodecTest extends TestCase
      */
     public static function positionalCursorProvider(): iterable
     {
-        // Odd-length numerics fail the strict-base64 gate outright; even-length ones
-        // survive it as binary garbage and die at the JSON gate. Both must land in
-        // the foreign-cursor lane, so the table covers both parities.
+        // Odd-length numerics fail the base64 gate; even-length ones die at the JSON gate.
+        // The table covers both parities.
         yield 'single digit page number' => ['2'];
         yield 'single digit, zero' => ['0'];
         yield 'two digits' => ['12'];
@@ -159,20 +148,14 @@ final class CursorCodecTest extends TestCase
     #[DataProvider('positionalCursorProvider')]
     public function decodePassesPlainIntegerCursorsThroughUntouched(string $input): void
     {
-        // REGRESSION GUARD for CursorWalk\Offset: PageNumberFetcher and OffsetFetcher
-        // emit bare integer strings as their endCursor. If any numeric string were
-        // mistaken for a position envelope, edge-cursor round-tripping over a
-        // page-numbered upstream would silently resume at the wrong window — so the
-        // wire format's safety is pinned here rather than assumed.
+        // PageNumberFetcher and OffsetFetcher emit bare integer cursors. Misreading one as an
+        // envelope would resume a page-numbered upstream at the wrong window.
         $codec = new CursorCodec();
 
         self::assertSame([$input, 0], $codec->decode($input));
     }
 
     /**
-     * Envelopes that clear all three gates — valid base64, valid JSON, both `v`
-     * and `o` present — but carry a payload the codec cannot use.
-     *
      * @return iterable<string, array{0: string}>
      */
     public static function structurallyValidButUnusableEnvelopeProvider(): iterable
@@ -190,12 +173,8 @@ final class CursorCodecTest extends TestCase
     #[DataProvider('structurallyValidButUnusableEnvelopeProvider')]
     public function decodeFallsBackToForeignForAnEnvelopeItCannotTrust(string $input): void
     {
-        // The last two guards in decode(): an offset that is not a non-negative
-        // int, and a page cursor that is neither null nor a string. Reachable from
-        // production — a client can send back any string it likes, and these
-        // decode far enough to look like our own envelope. Treating them as
-        // foreign is the safe reading; the alternative is a TypeError deep inside
-        // Paginator, from a value the application never controlled.
+        // Clients can send any string, and these decode far enough to look like our envelope.
+        // Trusting them would surface as a TypeError deep inside Paginator.
         $codec = new CursorCodec();
 
         self::assertSame([$input, 0], $codec->decode($input));
@@ -204,8 +183,7 @@ final class CursorCodecTest extends TestCase
     #[Test]
     public function decodeAcceptsAZeroOffsetWhichIsTheOnlyNonNegativeEdgeCase(): void
     {
-        // Guards against the guard being written as `$offset < 1` or `!$offset`:
-        // zero is a legal position, meaning "this page, nothing skipped".
+        // Pins the guard against `$offset < 1` or `!$offset`: zero means "this page, nothing skipped".
         $codec = new CursorCodec();
 
         self::assertSame([null, 0], $codec->decode($codec->encode(null, 0)));
@@ -215,9 +193,8 @@ final class CursorCodecTest extends TestCase
     #[Test]
     public function decodeTreatsTheEmptyStringAsTheFirstPage(): void
     {
-        // '' is what `$args['after'] ?? ''` produces for an absent argument, so
-        // it must mean "from the beginning" — passing it through as ['', 0]
-        // would make the docblock resolver recipes call fetchPage('').
+        // `$args['after'] ?? ''` yields '' for an absent argument; passing it through as ['', 0]
+        // would make the resolver recipes call fetchPage('').
         $codec = new CursorCodec();
 
         self::assertSame([null, 0], $codec->decode(''));

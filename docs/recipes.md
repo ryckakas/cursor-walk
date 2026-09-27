@@ -82,6 +82,9 @@ origin: a page anchor, or a non-zero offset into the first page. The Relay spec 
 that whenever the server knows it cheaply. It is an honest answer about where the window sits, not
 backward pagination. Omit `$pageStartCursor` and it is `false`.
 
+The formatter reads any bare positional cursor as a page anchor, so an `OffsetFetcher`'s `'0'`
+reports `true` even though it names the first row. Pass `null` for the first page, not `'0'`.
+
 ### Edge cursors
 
 Edge cursors come from an `EdgeCursorStrategy`. The default, `OffsetEdgeCursorStrategy`, encodes
