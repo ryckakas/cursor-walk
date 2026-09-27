@@ -5,6 +5,10 @@ version: 2
 # trade: it proposes each bump as its own PR, CI runs the full gate against it,
 # and the pin is updated deliberately instead of at install time.
 #
+# Cooldown holds a release for seven days before proposing it: a malicious or
+# broken publish is usually caught and yanked within the week, before it lands
+# here. With no semver-specific overrides it applies to major, minor and patch.
+#
 # There are no runtime dependencies to watch — `require` is `php` alone.
 updates:
   - package-ecosystem: composer
@@ -12,6 +16,8 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: build
     labels:
@@ -26,10 +32,15 @@ updates:
           - minor
           - patch
 
+  # The workflows pin each action to a commit with the release in a comment;
+  # Dependabot moves both. zizmor and bonsai-lint are pinned inside a workflow
+  # input and a composer script, where it cannot see them, so they move by hand.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: build
     labels:

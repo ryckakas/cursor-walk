@@ -50,6 +50,7 @@
         "stan": "phpstan analyse",
         "cs": "php-cs-fixer fix --dry-run --diff",
         "cs:fix": "php-cs-fixer fix",
+        "complexity": "npx --yes bonsai-lint@0.4.2 .",
         "coverage": [
             "@putenv XDEBUG_MODE=coverage",
             "phpunit --coverage-clover=build/coverage/clover.xml --coverage-text",
@@ -62,6 +63,7 @@
         "check": [
             "@cs",
             "@stan",
+            "@complexity",
             "@test",
             "@php examples/offline-example.php"
         ],
@@ -69,6 +71,7 @@
             "@composer validate --strict",
             "@cs",
             "@stan",
+            "@complexity",
             "@coverage",
             "@php examples/offline-example.php",
             "@mutation"
@@ -79,9 +82,10 @@
         "stan": "Run static analysis with PHPStan.",
         "cs": "Check code style without making changes.",
         "cs:fix": "Fix code style automatically.",
+        "complexity": "Run the cognitive complexity gate (bonsai-lint). Needs Node for npx.",
         "coverage": "Run tests with coverage and fail below the line-coverage floor.",
         "mutation": "Run mutation testing (Infection) and fail below the MSI floors.",
-        "check": "The fast local gate: code style, static analysis, tests, offline example smoke test.",
+        "check": "The fast local gate: code style, static analysis, complexity, tests, offline example smoke test.",
         "check:ci": "Everything CI runs, including coverage and mutation testing. Needs a coverage driver (xdebug or pcov)."
     }
 }
