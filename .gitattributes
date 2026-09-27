@@ -21,6 +21,7 @@
 /.gitattributes export-ignore
 /.gitignore export-ignore
 /.php-cs-fixer.dist.php export-ignore
+/.roave-backward-compatibility-check.xml export-ignore
 /AGENTS.md export-ignore
 /CLAUDE.md export-ignore
 /bonsai-lint.toml export-ignore
@@ -28,3 +29,4 @@
 /phpstan.neon export-ignore
 /phpunit.xml export-ignore
 /tests export-ignore
+/tools export-ignore

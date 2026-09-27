@@ -194,12 +194,15 @@ throws `MalformedPageException` for the one combination it refuses: `hasNextPage
 
 ```bash
 composer check      # code style, static analysis, complexity, tests, offline example
-composer check:ci   # everything CI runs, adding the coverage and mutation floors
+composer check:ci   # everything CI runs, adding coverage, mutation and the public API check
 ```
 
 `check:ci` needs xdebug or pcov. The complexity gate is
-[bonsai-lint](https://bonsai.kauneckas.dev), run through `npx`, so it needs Node. CI also audits
-the workflows with [zizmor](https://docs.zizmor.sh). [AGENTS.md](AGENTS.md) has the conventions.
+[bonsai-lint](https://bonsai.kauneckas.dev), run through `npx`, so it needs Node. `composer bc`
+fails on any break of the public API since the latest release, using
+[Roave BackwardCompatibilityCheck](https://github.com/Roave/BackwardCompatibilityCheck); it needs
+PHP 8.4+ and `composer install -d tools/bc-check` once. CI also audits the workflows with
+[zizmor](https://docs.zizmor.sh). [AGENTS.md](AGENTS.md) has the conventions.
 
 </details>
 

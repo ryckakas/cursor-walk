@@ -32,6 +32,24 @@ updates:
           - minor
           - patch
 
+  # The backward-compatibility checker's separate install, pinned exactly with a
+  # committed lock. One grouped PR, because nothing here ships and the "Public
+  # API" job re-running is the whole review.
+  - package-ecosystem: composer
+    directory: /tools/bc-check
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+    labels:
+      - dependencies
+    groups:
+      bc-check:
+        patterns:
+          - '*'
+
   # The workflows pin each action to a commit with the release in a comment;
   # Dependabot moves both. zizmor and bonsai-lint are pinned inside a workflow
   # input and a composer script, where it cannot see them, so they move by hand.

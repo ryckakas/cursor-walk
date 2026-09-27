@@ -4,3 +4,6 @@ parameters:
         - src
         - tests
         - tools
+    excludePaths:
+        # The backward-compatibility checker's own install, not code of this repository.
+        - tools/bc-check/vendor

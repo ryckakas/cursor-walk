@@ -7,7 +7,7 @@ it, so edit this file, never the link.
 
 ```bash
 composer check          # cs + stan + complexity + test + offline example — the gate before any commit
-composer check:ci       # everything CI runs: validate, cs, stan, complexity, coverage floor, example, mutation
+composer check:ci       # everything CI runs: validate, cs, stan, complexity, coverage floor, example, mutation, bc
 
 composer test           # phpunit
 composer stan           # phpstan analyse (level max, over src + tests + tools)
@@ -16,6 +16,7 @@ composer cs:fix         # apply the fixes
 composer coverage       # phpunit + Clover + tools/check-coverage.php (floor: 100%)
 composer mutation       # infection (floors: minMsi 85 / minCoveredMsi 85)
 composer complexity     # bonsai-lint cognitive complexity gate (bonsai-lint.toml + baseline)
+composer bc             # public API vs the latest release tag (Roave BackwardCompatibilityCheck)
 
 zizmor .github          # workflow security, CI's "Workflow security" job; not a composer script
 ```
@@ -42,6 +43,11 @@ Pass extra flags through Composer with `--`: `composer stan -- --no-progress`.
 - **`composer complexity` needs Node.** It runs `npx --yes bonsai-lint@<pinned>`, so `composer
   check` fails with "npx: command not found" on a machine without it. zizmor is a separate install
   (`brew install zizmor`, `cargo install zizmor`, or `uvx zizmor`); run the version `ci.yml` pins.
+- **`composer bc` needs PHP 8.4+ and its own install.** The checker lives in `tools/bc-check`, with
+  its own `composer.json` and committed lock, because it requires PHP 8.4 and the library's
+  `require-dev` must install on 8.2. Run `composer install -d tools/bc-check` once (`check:ci` does
+  it for you). It compares committed code only, needs the release tags locally, and fetches
+  packages on each run, so it is not part of the fast `composer check`.
 
 ## Architecture
 
@@ -144,17 +150,30 @@ annotations; a docblock on a closure assignment will not infer a generator's `TS
 
 ## Repository conventions
 
-- `main` is protected: 6 required checks (`PHP 8.2`/`8.3`/`8.4`/`8.5`, `Cognitive complexity`,
-  `Workflow security`), `strict`, `enforce_admins: true`, 0 required approvals. Every change —
-  including docs-only — goes through a PR. Renaming a CI job silently un-requires it; update
-  branch protection in the same change.
+- `main` is protected: 7 required checks (`PHP 8.2`/`8.3`/`8.4`/`8.5`, `Cognitive complexity`,
+  `Workflow security`, `Public API`), `strict`, `enforce_admins: true`, 0 required approvals. Every
+  change — including docs-only — goes through a PR. Renaming a CI job silently un-requires it;
+  update branch protection in the same change.
+- **The version moves when compatibility does.** CI's required **Public API** job (`composer bc`)
+  compares the PR against the latest release tag and fails on any break of the public API: a
+  removed class, method or constant, a changed signature, a narrowed type. Everything reachable
+  through `autoload` is public unless marked `@internal`, and marking a released member `@internal`
+  is itself a break. A break made on purpose is declared in the same PR, twice:
+  - in `.roave-backward-compatibility-check.xml` at the root (create it if absent), one
+    `<ignored-regex>` per `[BC]` line the job printed, with an XML comment giving the reason:
+    `<ignored-regex>#\[BC\] REMOVED: Method CursorWalk\\Page\#isEmpty\(\) was removed#</ignored-regex>`;
+  - under `[Unreleased]` in `CHANGELOG.md`, which commits the next tag to a breaking version:
+    0.2.x → 0.3.0 while below 1.0, x.y.z → (x+1).0.0 after.
+
+  The release PR for that tag deletes the file, since the next comparison starts from the new tag.
+  A release with only compatible changes is a patch, or a minor when it adds API.
 - **Workflows are audited like code.** Every `uses:` is pinned to a full commit SHA with the
   release in a trailing comment, every checkout sets `persist-credentials: false`, and the token is
   read-only. A new `uses:` line follows the same form, and zizmor fails CI until it does. There is
   no `.github/zizmor.yml`: fix a finding rather than suppress it, and if one truly must be
   accepted, pin the ignore to its `file:line:col` with the reason beside it.
-- **Two tool pins move by hand.** Dependabot (7-day cooldown) bumps Composer packages and action
-  SHAs, but not the bonsai-lint version in the `complexity` script or the zizmor version in
+- **Two tool pins move by hand.** Dependabot (7-day cooldown) bumps Composer packages (including
+  `tools/bc-check` and its lock) and action SHAs, but not the bonsai-lint version in the `complexity` script or the zizmor version in
   `ci.yml`. A bonsai-lint bump can move scores, so re-run the gate on the whole tree with it.
 - **The complexity baseline only shrinks.** `.bonsai-lint-baseline.json` records the functions
   that were already over the threshold of 15 when the gate was adopted. A new or grown finding
