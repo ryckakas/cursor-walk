@@ -51,6 +51,7 @@
         "cs": "php-cs-fixer fix --dry-run --diff",
         "cs:fix": "php-cs-fixer fix",
         "complexity": "npx --yes bonsai-lint@0.4.2 .",
+        "bc": "@php tools/bc-check/vendor/bin/roave-backward-compatibility-check",
         "coverage": [
             "@putenv XDEBUG_MODE=coverage",
             "phpunit --coverage-clover=build/coverage/clover.xml --coverage-text",
@@ -74,7 +75,9 @@
             "@complexity",
             "@coverage",
             "@php examples/offline-example.php",
-            "@mutation"
+            "@mutation",
+            "@composer install --working-dir=tools/bc-check --no-interaction --no-progress --quiet",
+            "@bc"
         ]
     },
     "scripts-descriptions": {
@@ -83,9 +86,10 @@
         "cs": "Check code style without making changes.",
         "cs:fix": "Fix code style automatically.",
         "complexity": "Run the cognitive complexity gate (bonsai-lint). Needs Node for npx.",
+        "bc": "Fail on any break of the public API since the latest release tag. Needs PHP 8.4+ and `composer install -d tools/bc-check` once.",
         "coverage": "Run tests with coverage and fail below the line-coverage floor.",
         "mutation": "Run mutation testing (Infection) and fail below the MSI floors.",
         "check": "The fast local gate: code style, static analysis, complexity, tests, offline example smoke test.",
-        "check:ci": "Everything CI runs, including coverage and mutation testing. Needs a coverage driver (xdebug or pcov)."
+        "check:ci": "Everything CI runs, including coverage, mutation testing and the public API check. Needs a coverage driver (xdebug or pcov) and PHP 8.4+."
     }
 }

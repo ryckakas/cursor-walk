@@ -1,0 +1,16 @@
+{
+    "name": "ryckakas/cursor-walk-bc-check",
+    "description": "The backward-compatibility checker CI's \"Public API\" job runs, installed apart from the library's own dev dependencies because it needs PHP 8.4+.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.4",
+        "roave/backward-compatibility-check": "8.22.0"
+    },
+    "config": {
+        "platform": {
+            "php": "8.4.1"
+        },
+        "sort-packages": true
+    }
+}

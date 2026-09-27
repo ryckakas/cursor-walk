@@ -126,6 +126,42 @@ jobs:
       - name: bonsai-lint
         run: composer complexity
 
+  api:
+    # A release is a promise about the public API, so this compares the PR
+    # against the latest release tag and fails on any break of it. A break made
+    # on purpose is declared in the same change: recorded with its reason in
+    # .roave-backward-compatibility-check.xml, and listed in CHANGELOG.md, so the
+    # next tag is a breaking one (0.2.x to 0.3.0 while below 1.0). Tagging that
+    # release clears the file. AGENTS.md has the procedure.
+    name: Public API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The base is the latest release tag, so history and tags must be here.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The checker needs PHP 8.4+, which the library itself does not, so it has
+      # its own composer.json and lock in tools/bc-check rather than a place in
+      # require-dev, where it would break the PHP 8.2 and 8.3 installs.
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      - name: Install the checker
+        run: composer install --working-dir=tools/bc-check --no-interaction --no-progress
+
+      - name: Audit the checker's dependencies
+        run: composer audit --working-dir=tools/bc-check
+
+      - name: Backward compatibility
+        run: composer bc -- --format=console --format=github-actions
+
   workflows:
     # The workflows are audited like code: pinned actions, least-privilege
     # tokens, no credentials left in the checkout, no template injection.
