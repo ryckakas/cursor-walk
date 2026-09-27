@@ -227,8 +227,8 @@ final class Paginator
      *
      * The walk stops the moment the answer is provable. If page *k* fills the
      * slice and still has a spare item — or claims `hasNextPage=true` — page
-     * *k+1* is never requested. Breaking out of the underlying `pages()`
-     * generator leaves it suspended, so no speculative fetch happens.
+     * *k+1* is never requested. Returning from inside the `foreach` over
+     * `pages()` leaves that generator suspended, so no speculative fetch happens.
      *
      * @template T
      *
@@ -259,46 +259,49 @@ final class Paginator
         // The cursor the page currently under inspection was FETCHED with. Page
         // itself only knows the cursor of the NEXT page, so we track this here.
         $fetchedWith = $pageCursor;
-
-        $hasNextPage = false;
-        $endCursor = null;
         $totalCount = null;
 
         foreach ($this->pages($fetcher, $pageCursor) as $page) {
             $totalCount = $page->totalCount;
-            $size = \count($page->items);
-            $consumed = 0;
 
-            if ($remainingSkip > 0) {
-                $dropped = min($remainingSkip, $size);
-                $consumed += $dropped;
-                $remainingSkip -= $dropped;
-            }
-
-            $take = min($size - $consumed, $first - \count($collected));
-            if ($take > 0) {
-                foreach (\array_slice($page->items, $consumed, $take) as $item) {
-                    $collected[] = $item;
-                }
-                $consumed += $take;
-            }
+            $dropped = min($remainingSkip, \count($page->items));
+            $remainingSkip -= $dropped;
+            $taken = \array_slice($page->items, $dropped, $first - \count($collected));
+            array_push($collected, ...$taken);
 
             if ($remainingSkip === 0 && \count($collected) >= $first) {
-                $hasNextPage = $consumed < $size || $page->hasNextPage;
-
-                if ($hasNextPage) {
-                    $endCursor = $consumed < $size
-                        ? $this->codec->encode($fetchedWith, $consumed)
-                        : $page->endCursor;
-                }
-
-                // Leaves the generator suspended: page k+1 is never fetched.
-                break;
+                // Returning leaves the generator suspended: page k+1 is never fetched.
+                return $this->endSliceIn($page, $fetchedWith, $dropped + \count($taken), $collected);
             }
 
             $fetchedWith = $page->endCursor;
         }
 
-        return new Page($collected, $endCursor, $hasNextPage, $totalCount);
+        return new Page($collected, null, false, $totalCount);
+    }
+
+    /**
+     * The slice is full inside `$page`, after `$consumed` of its items: decide
+     * what, if anything, comes after it.
+     *
+     * Items left unread in `$page` mean more data, addressed by the cursor that
+     * fetched the page plus the offset into it. A page read to its end defers to
+     * the upstream, whose own `endCursor` is the cheapest anchor there is; a
+     * trailing cursor on a final page is ignored, as everywhere else.
+     *
+     * @template T
+     *
+     * @param Page<T> $page
+     * @param list<T> $items
+     *
+     * @return Page<T>
+     */
+    private function endSliceIn(Page $page, ?string $fetchedWith, int $consumed, array $items): Page
+    {
+        if ($consumed < \count($page->items)) {
+            return new Page($items, $this->codec->encode($fetchedWith, $consumed), true, $page->totalCount);
+        }
+
+        return new Page($items, $page->hasNextPage ? $page->endCursor : null, $page->hasNextPage, $page->totalCount);
     }
 }

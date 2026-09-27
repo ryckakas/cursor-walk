@@ -16,7 +16,6 @@
 *.yml text eol=lf
 
 # Never exported to a `composer require` install or a GitHub archive.
-/.bonsai-lint-baseline.json export-ignore
 /.github export-ignore
 /.gitattributes export-ignore
 /.gitignore export-ignore

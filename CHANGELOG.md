@@ -15,6 +15,13 @@ Planned work lives in [ROADMAP.md](ROADMAP.md).
   trade-offs and comparisons to [docs/design.md](docs/design.md), and the roadmap to
   [ROADMAP.md](ROADMAP.md). No library behaviour changed.
 
+### Internal
+
+- `Paginator::slice()` hands the end-of-slice decision to a private helper, so every unit in the
+  repository now sits under the cognitive complexity threshold and the gate runs without a
+  baseline. Behaviour is unchanged. A new test pins the end offset of a slice that both skips and
+  ends inside one upstream page, which no test covered before.
+
 ## [0.2.0] - 2026-08-05
 
 Widens what the package can walk, without widening what the engine knows. Every addition either

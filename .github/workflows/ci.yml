@@ -105,9 +105,9 @@ jobs:
 
   complexity:
     # Syntax-only, so it does not depend on the PHP version and runs once rather
-    # than per matrix entry. The threshold lives in bonsai-lint.toml and the
-    # accepted findings in .bonsai-lint-baseline.json; the version is pinned in
-    # the `complexity` composer script, and npx comes from the runner's Node.
+    # than per matrix entry. The threshold lives in bonsai-lint.toml, with no
+    # baseline of accepted findings; the version is pinned in the `complexity`
+    # composer script, and npx comes from the runner's Node.
     name: Cognitive complexity
     runs-on: ubuntu-latest
     steps:

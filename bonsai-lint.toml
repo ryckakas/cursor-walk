@@ -1,4 +1,4 @@
 # Cognitive complexity gate: https://bonsai.kauneckas.dev
-# Functions over the threshold fail CI unless recorded in
-# .bonsai-lint-baseline.json, where an entry may shrink but never grow.
+# Any function over the threshold fails CI. There is deliberately no baseline,
+# so nothing is exempt: a finding is fixed by refactoring, not by recording it.
 threshold = 15

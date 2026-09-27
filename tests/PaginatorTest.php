@@ -998,6 +998,32 @@ final class PaginatorTest extends TestCase
     }
 
     #[Test]
+    public function aSliceThatSkipsAndEndsInsideOneUpstreamPageCountsBothInItsEndCursor(): void
+    {
+        // The second slice drops two items and takes two more from the same five-item page, so its
+        // end position is offset 4 of that page: the skipped items count as well as the taken ones.
+        $fetcher = new ArrayFetcher(self::dataset(10), 5);
+        $paginator = new Paginator();
+        $codec = new CursorCodec();
+
+        $first = $paginator->slice($fetcher, 2);
+        self::assertNotNull($first->endCursor);
+        [$pageCursor, $skip] = $codec->decode($first->endCursor);
+
+        $second = $paginator->slice($fetcher, 2, $pageCursor, $skip);
+        self::assertSame(self::itemRange(3, 4), $second->items);
+        self::assertTrue($second->hasNextPage);
+        self::assertNotNull($second->endCursor);
+        [$pageCursor, $skip] = $codec->decode($second->endCursor);
+
+        self::assertSame(
+            self::itemRange(5, 6),
+            $paginator->slice($fetcher, 2, $pageCursor, $skip)->items,
+            'resuming from the second slice must continue after item 4, not replay items 3 and 4',
+        );
+    }
+
+    #[Test]
     public function sliceReturnsTheRemainderWhenFewerThanFirstItemsRemain(): void
     {
         // spec case 22
