@@ -102,6 +102,9 @@ jobs:
           coverage: none
           tools: composer:v2
 
+      - name: Install dependencies
+        uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
+
       - name: bonsai-lint
         run: composer complexity
 
