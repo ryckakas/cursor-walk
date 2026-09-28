@@ -198,7 +198,7 @@ composer check:ci   # everything CI runs, adding coverage, mutation and the publ
 ```
 
 `check:ci` needs xdebug or pcov. The complexity gate is
-[bonsai-lint](https://bonsai.kauneckas.dev), run through `npx`, so it needs Node. `composer bc`
+[bonsai-lint](https://bonsai.kauneckas.dev), a dev dependency like the rest. `composer bc`
 fails on any break of the public API since the latest release, using
 [Roave BackwardCompatibilityCheck](https://github.com/Roave/BackwardCompatibilityCheck); it needs
 PHP 8.4+ and `composer install -d tools/bc-check` once. CI also audits the workflows with

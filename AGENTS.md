@@ -40,8 +40,9 @@ Pass extra flags through Composer with `--`: `composer stan -- --no-progress`.
 - **Line endings are load-bearing.** `.gitattributes` pins `eol=lf` in the working tree because
   php-cs-fixer's PSR-12 ruleset requires LF; a CRLF checkout makes `composer cs` report every file
   as broken while CI passes. Don't "fix" that file.
-- **`composer complexity` needs Node.** It runs `npx --yes bonsai-lint@<pinned>`, so `composer
-  check` fails with "npx: command not found" on a machine without it. zizmor is a separate install
+- **`composer complexity` downloads its binary once.** `bonsai-lint/bonsai-lint` is a launcher; the
+  first run of each version fetches a ~2 MB checksummed binary from GitHub Releases into `vendor/`.
+  Offline, point `BONSAI_LINT_BINARY` at a local build. zizmor is a separate install
   (`brew install zizmor`, `cargo install zizmor`, or `uvx zizmor`); run the version `ci.yml` pins.
 - **`composer bc` needs PHP 8.4+ and its own install.** The checker lives in `tools/bc-check`, with
   its own `composer.json` and committed lock, because it requires PHP 8.4 and the library's
@@ -183,15 +184,15 @@ annotations; a docblock on a closure assignment will not infer a generator's `TS
   read-only. A new `uses:` line follows the same form, and zizmor fails CI until it does. There is
   no `.github/zizmor.yml`: fix a finding rather than suppress it, and if one truly must be
   accepted, pin the ignore to its `file:line:col` with the reason beside it.
-- **Two tool pins move by hand.** Dependabot (7-day cooldown) bumps Composer packages (including
-  `tools/bc-check` and its lock) and action SHAs, but not the bonsai-lint version in the
-  `complexity` script or the zizmor version in `ci.yml`. A bonsai-lint bump can move scores, so
-  re-run the gate on the whole tree with it.
+- **One tool pin moves by hand.** Dependabot (7-day cooldown) bumps Composer packages (including
+  bonsai-lint, and `tools/bc-check` with its lock) and action SHAs, but not the zizmor version in
+  `ci.yml`. A bonsai-lint bump can move scores, so Dependabot opens it as its own PR, where the
+  Cognitive complexity job re-runs the whole tree.
 - **There is no complexity baseline, and there should not be one.** Every function, method and
   script body is at or under the threshold of 15, so a finding is fixed by refactoring, never by
   running `--write-baseline`. Examples and `tools/` count too: split a long script into named
-  functions rather than letting its file-level code grow. `npx --yes bonsai-lint@<pinned> --all .`
-  ranks every unit when you want to see what is close.
+  functions rather than letting its file-level code grow. `composer complexity -- --all` ranks
+  every unit when you want to see what is close.
 - Dev dependencies are pinned to **exact** versions (no carets), which is what makes
   `composer audit` actionable. `require: php >=8.2` stays a range — it is a compatibility contract.
 - Releases are tag-driven; Packagist syncs by webhook. `composer.json` carries no `version` field.

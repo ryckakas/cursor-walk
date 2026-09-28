@@ -19,6 +19,9 @@ updates:
       dev-tooling:
         patterns:
           - '*'
+        # A bonsai-lint bump can move scores, so it gets its own PR rather than blocking the rest.
+        exclude-patterns:
+          - 'bonsai-lint/bonsai-lint'
         update-types:
           - minor
           - patch
@@ -39,7 +42,7 @@ updates:
         patterns:
           - '*'
 
-  # zizmor and bonsai-lint are pinned where Dependabot cannot see them, so they move by hand.
+  # zizmor is pinned where Dependabot cannot see it, so it moves by hand.
   - package-ecosystem: github-actions
     directory: /
     schedule:
