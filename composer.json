@@ -23,7 +23,7 @@
     "require-dev": {
         "ext-simplexml": "*",
         "bonsai-lint/bonsai-lint": "0.4.3",
-        "friendsofphp/php-cs-fixer": "3.95.26",
+        "friendsofphp/php-cs-fixer": "3.95.27",
         "infection/infection": "0.32.6",
         "phpstan/phpstan": "2.2.14",
         "phpunit/phpunit": "11.5.56"
