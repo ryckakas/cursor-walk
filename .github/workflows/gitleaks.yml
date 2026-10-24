@@ -1,0 +1,40 @@
+name: Gitleaks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+# A second net under GitHub's secret scanning, which only knows provider token
+# formats. Gitleaks also catches generic keys and passwords.
+
+# Actions are pinned to a commit SHA because a tag can be moved after review.
+
+# Read-only: PR comments are off, so findings fail the job and land in its summary.
+permissions:
+  contents: read
+  pull-requests: read # the action lists a PR's commits to pick its scan range
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: PR and push runs scan their commit range, a manual run scans everything.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan for secrets
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_ENABLE_COMMENTS: false
