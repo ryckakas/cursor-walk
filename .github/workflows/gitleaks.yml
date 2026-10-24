@@ -10,6 +10,9 @@ on:
 # A second net under GitHub's secret scanning, which only knows provider token
 # formats. Gitleaks also catches generic keys and passwords.
 
+# The job name is a required check on main. Renaming it silently stops requiring
+# it, so update branch protection in the same change.
+
 # Actions are pinned to a commit SHA because a tag can be moved after review.
 
 # Read-only: PR comments are off, so findings fail the job and land in its summary.
