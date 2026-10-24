@@ -6,7 +6,7 @@ updates:
   - package-ecosystem: composer
     directory: /
     schedule:
-      interval: monthly
+      interval: weekly
     open-pull-requests-limit: 5
     cooldown:
       default-days: 7
@@ -16,6 +16,7 @@ updates:
       - dependencies
     groups:
       # One PR for the dev toolchain, because its tools are exercised together.
+      # Majors stay out of the group, so each breaking bump is its own PR.
       dev-tooling:
         patterns:
           - '*'
@@ -30,7 +31,7 @@ updates:
   - package-ecosystem: composer
     directory: /tools/bc-check
     schedule:
-      interval: monthly
+      interval: weekly
     cooldown:
       default-days: 7
     commit-message:
@@ -46,7 +47,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: monthly
+      interval: weekly
     cooldown:
       default-days: 7
     commit-message:
